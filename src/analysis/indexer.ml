@@ -1,11 +1,4 @@
 open Std
-(* DB format.
-   "CMI " ^ filename -> MTIME * DIGEST
-   "DIG " ^ DIGEST ->
-   "FWD " ^ DIGEST -> DIGEST LIST
-   "BKD " ^ DIGEST -> DIGEST LIST
-string_of_float
-*)
 
 type digest = Digest.t
 let section = Logger.section "indexer"
@@ -59,7 +52,10 @@ let fresh () = {
   addlist = [];
 }
 
+let json_of_digest digest = `String (Digest.to_hex digest)
+
 let rem db digest =
+  Logger.infojf section ~title:"rem digest" json_of_digest digest;
   try
     let info = Hashtbl.find db.digest_index digest in
     Hashtbl.remove db.digest_index digest;
@@ -69,6 +65,15 @@ let rem db digest =
   with Not_found -> ()
 
 let add db info =
+  Logger.infojf section ~title:"add info"
+    (fun {name; path; mtime; digest; deps} ->
+       `Assoc [
+         "name", `String name;
+         "path", `String path;
+         "mtime", `Float mtime;
+         "digest", json_of_digest digest;
+         "deps", `List (List.map json_of_digest deps)
+       ]) info;
   let skip =
     try
       let info' = Hashtbl.find db.path_index info.path in
@@ -78,9 +83,13 @@ let add db info =
         (rem db info'.digest; false)
     with Not_found -> false
   in
-  Hashtbl.replace db.path_index info.path info;
-  Hashtbl.replace db.digest_index info.digest info;
-  db.addlist <- info :: db.addlist
+  if skip then ()
+  else
+    begin
+      Hashtbl.replace db.path_index info.path info;
+      Hashtbl.replace db.digest_index info.digest info;
+      db.addlist <- info :: db.addlist
+    end
 
 let compact db =
   let to_remove = Hashtbl.create 7 in
@@ -115,15 +124,30 @@ let compact db =
     let digests = List.filter (not_in to_remove) digests in
     let digests = deps @ digests in
     if digests = [] then
-      Hashtbl.remove db.back_deps digest
+      begin
+        Logger.infojf section ~title:"remove backdeps" json_of_digest digest;
+        Hashtbl.remove db.back_deps digest
+      end
     else
-      Hashtbl.replace db.back_deps digest digests
+      begin
+        Logger.infojf section ~title:"update backdeps"
+          (fun (digest, digests) ->
+                `Assoc [
+                  "digest", json_of_digest digest;
+                  "rdeps", `List (List.map json_of_digest digests)
+               ]) (digest, digests);
+        Hashtbl.replace db.back_deps digest digests
+      end
   in
-  Hashtbl.iter update_back to_update
+  Hashtbl.iter update_back to_update;
+  Logger.info section ~title:"compact" "done"
 
 let compact = function
-  | { addlist = []; remlist = [] } -> ()
-  | db -> compact db
+  | { addlist = []; remlist = [] } ->
+    Logger.info section ~title:"compact" "nothing to do";
+  | db ->
+    Logger.info section ~title:"compact" "starting compaction";
+    compact db
 
 let outdated db =
   let is_old info = file_mtime info.path <> info.mtime in
@@ -158,13 +182,14 @@ let update_path db paths =
       let files = Array.to_list (Sys.readdir path) in
       let is_cmi fn = Filename.check_suffix fn ".cmi" in
       let files = List.filter is_cmi files in
-      let files = List.map ~f:(Filename.concat path) files in
-      files
+      match List.map ~f:(Filename.concat path) files with
+      | [] -> None
+      | files -> Some files
     with _exn ->
       Logger.errorj section ~title:"expand_path" (`String path);
-      []
+      None
   in
-  let paths = List.Lazy.map ~f:expand_path paths in
+  let paths = List.Lazy.filter_map ~f:expand_path paths in
   let paths = List.Lazy.to_strict paths in
   let paths = List.concat paths in
   update_cmis db paths
@@ -174,6 +199,11 @@ let rdeps db digest =
   try Hashtbl.find db.back_deps digest
   with Not_found -> []
 
-let path db digest =
+let find_digest db digest =
   compact db;
-  (Hashtbl.find db.digest_index digest).path
+  Hashtbl.find db.digest_index digest
+
+let find_path db path =
+  compact db;
+  Hashtbl.find db.path_index path
+

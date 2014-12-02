@@ -165,6 +165,9 @@ type _ request =
   | Occurrences
     : [`Ident_at of position]
     -> Location.t list request
+  | Users_of_module
+    :  string
+    -> string list request
   | Idle_job
     : bool request
   | Version

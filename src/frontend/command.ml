@@ -35,11 +35,12 @@ open Merlin_lib
 type state = {
   mutable buffer : Buffer.t;
   mutable lexer : Lexer.t option;
+  index: Indexer.db;
 }
 
 let new_state () =
   let buffer = Buffer.create Parser.implementation in
-  {buffer; lexer = None}
+  {buffer; lexer = None; index = Indexer.fresh ()}
 
 let checkout_buffer_cache = ref []
 let checkout_buffer =
@@ -888,6 +889,20 @@ let dispatch (state : state) =
     let loc_start l = l.Location.loc_start in
     let cmp l1 l2 = Lexing.compare_pos (loc_start l1) (loc_start l2) in
     List.sort ~cmp locs
+
+  | (Users_of_module name : a request) ->
+    let path = Project.build_path (Buffer.project state.buffer) in
+    let filename = find_in_path_uncap path (name ^ ".cmi") in
+    Logger.info (Logger.section "indexer")
+      ~title:"Users_of_module filename" filename;
+    let index = state.index in
+    Indexer.update_path index (Path_list.to_list path);
+    let cmi = Indexer.find_path index filename in
+    let rdeps = Indexer.rdeps index cmi.Indexer.digest in
+    List.filter_map ~f:(fun digest' ->
+        try Some (Indexer.find_digest index digest').Indexer.name
+        with Not_found -> None)
+      rdeps
 
   | (Version : a request) ->
     Main_args.version_spec
