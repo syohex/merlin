@@ -79,6 +79,11 @@ SOURCES = \
 	$(TYPER)/typing/predef.ml         \
 	$(TYPER)/typing/datarepr.mli      \
 	$(TYPER)/typing/datarepr.ml       \
+	$(TYPER)/utils/lambda.mli     		\
+	$(TYPER)/utils/clambda.mli     		\
+	$(TYPER)/utils/debuginfo.mli      \
+	$(TYPER)/utils/cmo_format.mli     \
+	$(TYPER)/utils/cmx_format.mli     \
 	src/ocaml_aux/tbl.mli             \
 	src/ocaml_aux/tbl.ml              \
 	$(TYPER)/typing/subst.mli         \

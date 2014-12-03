@@ -1,6 +1,5 @@
 open Std
 
-type digest = Digest.t
 let section = Logger.section "indexer"
 
 let file_mtime path =
@@ -11,9 +10,64 @@ type cmi = {
   name: string;
   path: string;
   mtime: float;
-  digest: digest;
-  deps: digest list;
+  digest: Digest.t;
+  intf_deps: Digest.t list;
+  impl_deps: Digest.t list;
 }
+
+let get_cmo path =
+  (* From objinfo.ml *)
+  try
+    let ic = open_in_bin path in
+    let len_magic_number = String.length Config.cmo_magic_number in
+    let magic_number = really_input_string ic len_magic_number in
+    if magic_number <> Config.cmo_magic_number then
+      raise Not_found;
+    let cu_pos = input_binary_int ic in
+    seek_in ic cu_pos;
+    let cu = (input_value ic : Cmo_format.compilation_unit) in
+    close_in ic;
+    List.filter_map ~f:snd cu.Cmo_format.cu_imports
+  with _exn ->
+    (*FIXME: log exn*)
+    []
+
+let get_cmx path =
+  (* From objinfo.ml *)
+  try
+    let ic = open_in_bin path in
+    let len_magic_number = String.length Config.cmo_magic_number in
+    let magic_number = really_input_string ic len_magic_number in
+    if magic_number <> Config.cmx_magic_number then
+      raise Not_found;
+    let ui = (input_value ic : Cmx_format.unit_infos) in
+    close_in ic;
+    List.filter_map ~f:snd ui.Cmx_format.ui_imports_cmi
+  with _exn ->
+    (*FIXME: log exn*)
+    []
+
+let get_impl path =
+  let path = Filename.chop_extension path in
+  let cmo_path = path ^ ".cmo" in
+  let cmx_path = path ^ ".cmx" in
+  match file_mtime cmo_path, file_mtime cmx_path with
+  | cmo, cmx when cmo == nan && cmx == nan ->
+    Logger.infojf section ~title:"get_impl"
+      (fun path -> `List [`String path; `Null])
+      path;
+    []
+  | cmo, cmx when (cmo > cmx) || cmx == nan ->
+    Logger.infojf section ~title:"get_impl"
+      (fun (path,path') -> `List [`String path; `String path'])
+      (path,cmo_path);
+    get_cmo cmo_path
+  | cmo, cmx when (cmx > cmo) || cmo == nan ->
+    Logger.infojf section ~title:"get_impl"
+      (fun (path,path') -> `List [`String path; `String path'])
+      (path,cmx_path);
+    get_cmx cmx_path
+  | _ -> []
 
 let get_cmi path =
   let open Cmi_format in
@@ -29,16 +83,17 @@ let get_cmi path =
     | (_, Some digest) :: xs ->
       deps mydigest (digest :: acc) xs
   in
-  let digest, deps = deps "" [] cmi.cmi_crcs in
+  let digest, intf_deps = deps "" [] cmi.cmi_crcs in
+  let impl_deps = get_impl path in
   if digest = "" then
     raise Not_found
   else
-    { name; path; mtime; digest; deps }
+    { name; path; mtime; digest; intf_deps; impl_deps }
 
 type db = {
   path_index: (string, cmi) Hashtbl.t;
   digest_index: (Digest.t, cmi) Hashtbl.t;
-  back_deps: (Digest.t, Digest.t list) Hashtbl.t;
+  back_deps: (Digest.t, ([`Intf | `Impl] * Digest.t) list) Hashtbl.t;
 
   mutable remlist: cmi list;
   mutable addlist: cmi list;
@@ -66,13 +121,14 @@ let rem db digest =
 
 let add db info =
   Logger.infojf section ~title:"add info"
-    (fun {name; path; mtime; digest; deps} ->
+    (fun {name; path; mtime; digest; intf_deps; impl_deps} ->
        `Assoc [
          "name", `String name;
          "path", `String path;
          "mtime", `Float mtime;
          "digest", json_of_digest digest;
-         "deps", `List (List.map json_of_digest deps)
+         "intf_deps", `List (List.map json_of_digest intf_deps);
+         "impl_deps", `List (List.map json_of_digest impl_deps);
        ]) info;
   let skip =
     try
@@ -95,22 +151,25 @@ let compact db =
   let to_remove = Hashtbl.create 7 in
   let to_update = Hashtbl.create 7 in
   let remember tbl v digest = Hashtbl.replace tbl digest v in
-  let not_in tbl v = not (Hashtbl.mem tbl v) in
   let rem_info info =
     if Hashtbl.mem db.digest_index info.digest then ()
     else begin
       remember to_remove () info.digest;
-      List.iter (remember to_update []) info.deps
+      List.iter (remember to_update []) info.intf_deps;
+      List.iter (remember to_update []) info.impl_deps
     end
   and add_info info =
-    let update_dep digest =
+    let update_dep tag digest =
       let existing =
         try Hashtbl.find to_update digest
         with Not_found -> [] in
-      Hashtbl.replace to_update digest (info.digest :: existing)
+       Hashtbl.replace to_update digest ((tag, info.digest) :: existing)
     in
     if not (Hashtbl.mem to_remove info.digest) then
-      List.iter update_dep info.deps
+      begin
+        List.iter (update_dep `Intf) info.intf_deps;
+        List.iter (update_dep `Impl) info.impl_deps
+      end
   in
   List.iter rem_info db.remlist;
   List.iter add_info db.addlist;
@@ -121,7 +180,8 @@ let compact db =
       try Hashtbl.find db.back_deps digest
       with Not_found -> []
     in
-    let digests = List.filter (not_in to_remove) digests in
+    let not_removed (_tag,digest) = not (Hashtbl.mem to_remove digest) in
+    let digests = List.filter not_removed digests in
     let digests = deps @ digests in
     if digests = [] then
       begin
@@ -132,10 +192,17 @@ let compact db =
       begin
         Logger.infojf section ~title:"update backdeps"
           (fun (digest, digests) ->
-                `Assoc [
-                  "digest", json_of_digest digest;
-                  "rdeps", `List (List.map json_of_digest digests)
-               ]) (digest, digests);
+             let json_of_backdep (tag,digest) =
+               `List [
+                 `String (match tag with
+                     | `Impl -> "impl"
+                     | `Intf -> "intf");
+                 json_of_digest digest
+               ] in
+             `Assoc [
+               "digest", json_of_digest digest;
+               "rdeps", `List (List.map json_of_backdep digests)
+             ]) (digest, digests);
         Hashtbl.replace db.back_deps digest digests
       end
   in

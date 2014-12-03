@@ -899,10 +899,13 @@ let dispatch (state : state) =
     Indexer.update_path index (Path_list.to_list path);
     let cmi = Indexer.find_path index filename in
     let rdeps = Indexer.rdeps index cmi.Indexer.digest in
-    List.filter_map ~f:(fun digest' ->
-        try Some (Indexer.find_digest index digest').Indexer.name
-        with Not_found -> None)
-      rdeps
+    let rdeps =
+      List.filter_map ~f:(fun (_,digest') ->
+          try Some (Indexer.find_digest index digest').Indexer.name
+          with Not_found -> None)
+        rdeps
+    in
+    List.filter_dup rdeps
 
   | (Version : a request) ->
     Main_args.version_spec
