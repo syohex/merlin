@@ -765,3 +765,8 @@ module Obj = struct
 end
 
 let (@@) f x = f x
+
+let really_input_string ic len =
+  let s = String.create len in
+  really_input ic s 0 len;
+  s

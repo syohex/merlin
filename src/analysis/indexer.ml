@@ -27,7 +27,8 @@ let get_cmo path =
     seek_in ic cu_pos;
     let cu = (input_value ic : Cmo_format.compilation_unit) in
     close_in ic;
-    List.filter_map ~f:snd cu.Cmo_format.cu_imports
+    let imports = Raw_compat.cmo_imports cu in
+    List.filter_map ~f:snd imports
   with _exn ->
     (*FIXME: log exn*)
     []
@@ -42,7 +43,8 @@ let get_cmx path =
       raise Not_found;
     let ui = (input_value ic : Cmx_format.unit_infos) in
     close_in ic;
-    List.filter_map ~f:snd ui.Cmx_format.ui_imports_cmi
+    let imports = Raw_compat.cmx_imports ui in
+    List.filter_map ~f:snd imports
   with _exn ->
     (*FIXME: log exn*)
     []
@@ -83,7 +85,7 @@ let get_cmi path =
     | (_, Some digest) :: xs ->
       deps mydigest (digest :: acc) xs
   in
-  let digest, intf_deps = deps "" [] cmi.cmi_crcs in
+  let digest, intf_deps = deps "" [] (Raw_compat.cmi_crcs cmi) in
   let impl_deps = get_impl path in
   if digest = "" then
     raise Not_found

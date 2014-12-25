@@ -425,3 +425,6 @@ let construct_ident_and_expressions = function
     id, es
   | _ -> assert false
 
+let cmo_imports cu = cu.Cmo_format.cu_imports
+let cmx_imports ui = ui.Cmx_format.ui_imports_cmi
+let cmi_crcs cmi = cmi.Cmi_format.cmi_crcs

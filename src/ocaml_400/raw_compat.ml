@@ -407,3 +407,10 @@ let construct_ident_and_expressions = function
   | Typedtree.Texp_construct (_, id, _, es, _) ->
     id, es
   | _ -> assert false
+
+let prepare_imports l =
+  List.map ~f:(fun (s,d) -> s, Some d) l
+
+let cmo_imports cu = prepare_imports cu.Cmo_format.cu_imports
+let cmx_imports ui = prepare_imports ui.Cmx_format.ui_imports_cmi
+let cmi_crcs cmi = prepare_imports cmi.Cmi_format.cmi_crcs
