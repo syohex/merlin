@@ -279,6 +279,10 @@ module List = struct
 
   let sort_uniq ~cmp l =
     uniq ~cmp (sort ~cmp l)
+
+  let cons_option x xs = match x with
+    | None -> xs
+    | Some x -> x :: xs
 end
 
 module Option = struct

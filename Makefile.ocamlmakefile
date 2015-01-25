@@ -41,6 +41,8 @@ SOURCES = \
 	src/utils/ppxsetup.ml             \
 	src/utils/mymap.mli            		\
 	src/utils/mymap.ml             		\
+	src/utils/hashlut.mli             \
+	src/utils/hashlut.ml              \
 	$(TYPER)/utils/warnings.mli       \
 	$(TYPER)/utils/warnings.ml        \
 	$(TYPER)/utils/config.mli         \
