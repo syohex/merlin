@@ -205,12 +205,19 @@ let line_window_size = 5
 module Learner : sig
   type t
   val fresh: unit -> t
-  val learn: from:(Merlin_lexer.item * Merlin_recover.t) History.t -> t -> unit
+  val learn: t -> from:(Merlin_lexer.item * Merlin_recover.t) History.t -> unit
 end = struct
   (* Map a Linewindow hash to a set of parser hashes *)
   type t = (hash, HashSet.t) Hashtbl.t
 
   let fresh () = Hashtbl.create 117
+
+  let register t index hasher =
+    let hashset =
+      try Hashtbl.find t index
+      with Not_found -> HashSet.empty
+    in
+    Hashtbl.replace t index (HashSet.add (Parserhasher.get hasher) hashset)
 
   let all_lines tokens =
     let window = Linewindow.fresh ~size:line_window_size in
@@ -221,13 +228,29 @@ end = struct
     in
     let rec aux acc = function
       | [] -> flush acc
-      | (_recover, item) :: items ->
+      | (item, _recover) :: items ->
         aux (List.cons_option (Linewindow.push window item) acc) items
     in
-    aux []
+    aux [] tokens
 
-  let learn ~from t =
+  let rec find_parser item = function
+    | (_, recover) :: ((item', _) :: _ as tail) when item == item' ->
+      Merlin_recover.parser recover, tail
+    | _ :: tail -> find_parser item tail
+    | [] -> assert false
+
+  let rec learn t hasher tail = function
+    | [] -> ()
+    | (_, []) :: _ -> assert false
+    | (hash, (item :: _ as line)) :: lines ->
+      let parser, tail = find_parser item tail in
+      let hasher = Parserhasher.hash parser hasher in
+      register t hash hasher;
+      learn t hasher tail lines
+
+  let learn t ~from =
     let _, current = History.focused from in
-    let lines = all_lines (History.tail from) in
-
+    let tail = History.tail from in
+    let lines = all_lines tail in
+    learn t Parserhasher.empty tail lines
 end
