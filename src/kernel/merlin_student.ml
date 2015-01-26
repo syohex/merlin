@@ -23,41 +23,39 @@ end
 (* Maintain a rolling window, with a custom payload *)
 module Rollingwindow : sig
   type 'a t
-  val fresh : size:int -> 'a t
-  val push : hash -> 'a option -> 'a t -> hash * 'a option
+  val fresh : size:int -> 'a -> 'a t
+  val push : hash -> 'a -> 'a t -> 'a t * hash * 'a
 end = struct
   type 'a t = {
-    mutable cursor: int;
-    mutable hash : hash;
-    items: hash array;
-    payloads: 'a option array;
+    size: int;
+    hash: hash;
+    head: (hash * 'a) list;
+    tail: (hash * 'a) list;
   }
 
-  let fresh ~size =
+  let fresh ~size x =
     assert (size > 0);
     {
-      cursor = 0;
+      size;
       hash = Rollinghash.empty;
-      items = Array.make size 0L;
-      payloads = Array.make size None;
+      head = [];
+      tail = List.replicate (0L,x) size;
     }
 
-  let push item payload t =
-    let size = Array.length t.items in
-    let cursor = t.cursor in
-    let hash = t.hash in
-    let hash = Rollinghash.remove ~size ~item:t.items.(cursor) hash in
+  let pop tail head = match tail with
+    | item :: tail ->
+      item, tail, head
+    | [] ->
+      match List.rev head with
+      | item :: tail ->
+        item, tail, []
+      | [] -> assert false
+
+  let push item payload {size; hash; tail; head}  =
+    let (item', payload'), tail, head = pop tail head in
+    let hash = Rollinghash.remove ~size ~item:item' hash in
     let hash = Rollinghash.push ~item hash in
-    t.hash <- hash;
-    let payload' = t.payloads.(cursor) in
-    t.items.(cursor) <- item;
-    t.payloads.(cursor) <- payload;
-    let cursor = cursor + 1 in
-    if cursor = size then
-      t.cursor <- 0
-    else
-      t.cursor <- cursor;
-    hash, payload'
+    {size; hash; head = (item,payload) :: head; tail}, hash, payload'
 end
 
 (* Incremental hashing of a menhir parser *)
@@ -150,51 +148,51 @@ end
 (* Rolling window over consecutive lines of the lexer *)
 module Linewindow : sig
   type t
+  type line = hash * Merlin_lexer.item list
   val fresh : size:int -> t
-  val push : t -> Merlin_lexer.item -> (hash * Merlin_lexer.item list) option
-  val flush : t -> hash * Merlin_lexer.item list
+  val push : t -> Merlin_lexer.item -> t * line  option
+  val flush : t -> t * line
+
 end = struct
   type t = {
-    mutable line: Linehasher.t;
-    mutable items: Merlin_lexer.item list;
+    line: Linehasher.t;
+    items: Merlin_lexer.item list;
     window: Merlin_lexer.item list Rollingwindow.t;
   }
+  type line = hash * Merlin_lexer.item list
 
   let fresh ~size =
     { line = Linehasher.empty;
       items = [];
-      window = Rollingwindow.fresh ~size }
+      window = Rollingwindow.fresh ~size [] }
 
   let token_class token =
     Raw_parser_values.(class_of_symbol (symbol_of_token token))
 
   let push t item =
-    t.items <- item :: t.items;
+    let items = item :: t.items in
     match item with
-    | Merlin_lexer.Error _ -> None
+    | Merlin_lexer.Error _ -> {t with items}, None
     | Merlin_lexer.Valid (startp, token, _) ->
       match token_class token with
       | Raw_parser_values.CN_ _ -> assert false
       | Raw_parser_values.CT_ (tc, _) ->
         let line, h = Linehasher.push startp tc t.line in
-        t.line <- line;
         match h with
-        | None -> None
+        | None -> {t with items; line}, None
         | Some hash ->
-          let items = List.rev t.items in
-          t.items <- [];
-          let h, result = Rollingwindow.push hash (Some items) t.window in
+          let items = List.rev items in
+          let window, h, result = Rollingwindow.push hash items t.window in
+          let t = {items; window; line} in
           match result with
-          | None -> None
-          | Some result -> Some (h, result)
+          | [] -> t, None
+          | result -> t, Some (h, result)
 
   let flush t =
     let line, hash = Linehasher.flush t.line in
-    t.line <- line;
     let items = List.rev t.items in
-    t.items <- [];
-    let h, result = Rollingwindow.push hash (Some items) t.window in
-    h, Option.value ~default:[] result
+    let window, h, result = Rollingwindow.push hash items t.window in
+    {line; items; window}, (h, result)
 end
 
 module HashSet = Set.Make (struct
@@ -225,19 +223,20 @@ end = struct
     Hashtbl.replace t index (HashSet.add value hashset)
 
   let all_lines get_item tokens =
-    let window = Linewindow.fresh ~size:line_window_size in
-    let rec flush acc =
-      match Linewindow.flush window with
+    let rec flush window acc =
+      let window, line = Linewindow.flush window in
+      match line with
       | _, [] -> List.rev acc
-      | line -> flush (line :: acc)
+      | _ -> flush window (line :: acc)
     in
-    let rec aux acc = function
-      | [] -> flush acc
+    let rec aux window acc = function
+      | [] -> flush window acc
       | x :: xs ->
-        let item = get_item x in
-        aux (List.cons_option (Linewindow.push window item) acc) xs
+        let window, line = Linewindow.push window (get_item x) in
+        aux window (List.cons_option line acc) xs
     in
-    aux [] tokens
+    let window = Linewindow.fresh ~size:line_window_size in
+    aux window [] tokens
 
   let rec find_parser get_parser get_item item = function
     | x0 :: (x1 :: _ as tail) when get_item x1 == item ->
