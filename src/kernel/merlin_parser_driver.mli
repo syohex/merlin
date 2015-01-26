@@ -28,6 +28,8 @@
 
 type t
 
+val wisdom : Merlin_student.Learner.t
+
 val from_parser : Merlin_parser.t -> t
 val step : Merlin_lexer.item -> t -> t
 

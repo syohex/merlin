@@ -331,7 +331,7 @@ let dispatch (state : state) =
       let get_doc =
         if not with_doc then None else
         let project    = Buffer.project state.buffer in
-        let comments   = Buffer.comments state.buffer in
+        let comments   = Buffer.parser_comments state.buffer in
         let source     = Buffer.unit_name state.buffer in
         let local_defs = Typer.contents typer in
         Some (
@@ -394,7 +394,7 @@ let dispatch (state : state) =
 
   | (Document (patho, pos) : a request) ->
     with_typer state @@ fun typer ->
-    let comments = Buffer.comments state.buffer in
+    let comments = Buffer.parser_comments state.buffer in
     let env, local_defs =
       let node, _ = Browse.node_at typer pos in
       node.BrowseT.t_env, Typer.contents typer
@@ -516,19 +516,19 @@ let dispatch (state : state) =
     begin match Option.bind state.lexer ~f:Lexer.get_mark with
     | None -> ()
     | Some mark ->
-      let recoveries = Buffer.recover_history state.buffer in
+      let drivers = Buffer.parser_driver_history state.buffer in
       let diff = ref None in
-      let check_item (lex_item,recovery) =
-        let parser = Driver.parser recovery in
+      let check_item (lex_item,driver) =
+        let parser = Driver.parser driver in
         let result = Parser.has_marker ?diff:!diff parser mark in
         diff := Some (parser,result);
         not result
       in
-      if check_item (History.focused recoveries) then
-        let recoveries = History.move (-1) recoveries in
-        let recoveries = History.seek_backward check_item recoveries in
-        let recoveries = History.move 1 recoveries in
-        let item, _ = History.focused recoveries in
+      if check_item (History.focused drivers) then
+        let drivers = History.move (-1) drivers in
+        let drivers = History.seek_backward check_item drivers in
+        let drivers = History.move 1 drivers in
+        let item, _ = History.focused drivers in
         let items = Buffer.lexer state.buffer in
         let items = History.seek_backward (fun (_,i) -> i != item) items in
         buffer_freeze state items;
@@ -631,7 +631,7 @@ let dispatch (state : state) =
     end
 
   | (Dump `Parser : a request) ->
-    Driver.dump (Buffer.recover state.buffer);
+    Driver.dump (Buffer.parser_driver state.buffer);
 
   | (Dump (`Typer `Input) : a request) ->
     with_typer state @@ fun typer ->
@@ -652,7 +652,7 @@ let dispatch (state : state) =
     `String (to_string ())
 
   | (Dump `Recover : a request) ->
-    Driver.dump_recoverable (Buffer.recover state.buffer);
+    Driver.dump_recoverable (Buffer.parser_driver state.buffer);
 
   | (Dump (`Env (kind, pos)) : a request) ->
     with_typer state @@ fun typer ->

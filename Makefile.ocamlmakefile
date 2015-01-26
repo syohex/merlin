@@ -165,9 +165,9 @@ SOURCES = \
 	src/kernel/merlin_lexer.ml        \
 	src/kernel/merlin_recovery.mli    \
 	src/kernel/merlin_recovery.ml     \
+	src/kernel/merlin_student.ml      \
 	src/kernel/merlin_parser_driver.mli \
 	src/kernel/merlin_parser_driver.ml  \
-	src/kernel/merlin_student.ml      \
 	$(TYPER)/utils/pparse.mli         \
 	$(TYPER)/utils/pparse.ml          \
 	$(TYPER)/raw_typer.mli            \

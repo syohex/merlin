@@ -435,8 +435,6 @@ end = struct
     Cmi_cache.flush ();
 end
 
-let wisdom = Merlin_student.Learner.fresh ()
-
 module Buffer : sig
   type t
   val create: ?dot_merlins:string list -> ?path:string -> Parser.state -> t
@@ -449,13 +447,12 @@ module Buffer : sig
   val start_lexing: ?pos:Lexing.position -> t -> Lexer.t
   val lexer_errors: t -> exn list
 
-  val comments: t -> (string * Location.t) list
+  val parser_driver: t -> Driver.t
+  val parser_driver_history : t -> (Lexer.item * Driver.t) History.t
 
   val parser: t -> Parser.t
   val parser_errors: t -> exn list
-
-  val recover: t -> Driver.t
-  val recover_history : t -> (Lexer.item * Driver.t) History.t
+  val parser_comments: t -> (string * Location.t) list
 
   val typer: t -> Typer.t
 
@@ -481,7 +478,7 @@ end = struct
     mutable stamp : bool ref;
     mutable keywords: Lexer.keywords;
     mutable lexer: (exn list * Lexer.item) History.t;
-    mutable recover: (Lexer.item * Driver.t) History.t;
+    mutable driver: (Lexer.item * Driver.t) History.t;
     mutable typer: Typer.t;
   }
 
@@ -540,7 +537,7 @@ end = struct
     {
       dot_merlins; path; project; lexer; kind; unit_name; stamp;
       keywords = Project.keywords project;
-      recover = History.initial (initial_step kind (History.focused lexer));
+      driver = History.initial (initial_step kind (History.focused lexer));
       typer = Typer.fresh
           ~unit_name ~stamp:[Project.validity_stamp project; stamp]
           (Project.extensions project);
@@ -561,13 +558,13 @@ end = struct
   let lexer b = b.lexer
   let lexer_errors b = fst (History.focused b.lexer)
 
-  let recover_history b = b.recover
-  let recover b = snd (History.focused b.recover)
+  let parser_driver_history b = b.driver
+  let parser_driver b = snd (History.focused b.driver)
 
-  let comments b = Driver.comments (recover b)
+  let parser b = Driver.parser (parser_driver b)
+  let parser_errors b = Driver.exns (parser_driver b)
+  let parser_comments b = Driver.comments (parser_driver b)
 
-  let parser b = Driver.parser (recover b)
-  let parser_errors b = Driver.exns (recover b)
 
   let typer b =
     setup b;
@@ -590,9 +587,9 @@ end = struct
     let init token = initial_step t.kind token in
     let strong_fold (_,token) (_,recover) = token, Driver.step token recover in
     let weak_update (_,token) (_,recover) = (token,recover) in
-    let recover', updated = History.sync t.lexer (Some t.recover)
+    let driver', updated = History.sync t.lexer (Some t.driver)
         ~init ~strong_check ~strong_fold ~weak_check ~weak_update; in
-    t.recover <- recover';
+    t.driver <- driver';
     updated
 
   let start_lexing ?pos b =
@@ -640,8 +637,8 @@ end = struct
     Types.Concr.exists Printtyp.compute_map_for_pers concr
 
   let learn t =
-    Merlin_student.Learner.learn wisdom
-      (History.seek_backward (fun _ -> true) t.recover)
+    Merlin_student.Learner.learn Driver.wisdom
+      (History.seek_backward (fun _ -> true) t.driver)
       (fun (_i,r) -> Driver.parser r)
       (fun (i,_r) -> i)
 end

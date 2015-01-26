@@ -150,7 +150,7 @@ module Linewindow : sig
   type t
   type line = hash * Merlin_lexer.item list
   val fresh : size:int -> t
-  val push : t -> Merlin_lexer.item -> t * line  option
+  val push : Merlin_lexer.item -> t -> t * line  option
   val flush : t -> t * line
 
 end = struct
@@ -169,7 +169,7 @@ end = struct
   let token_class token =
     Raw_parser_values.(class_of_symbol (symbol_of_token token))
 
-  let push t item =
+  let push item t =
     let items = item :: t.items in
     match item with
     | Merlin_lexer.Error _ -> {t with items}, None
@@ -183,7 +183,7 @@ end = struct
         | Some hash ->
           let items = List.rev items in
           let window, h, result = Rollingwindow.push hash items t.window in
-          let t = {items; window; line} in
+          let t = {items = []; window; line} in
           match result with
           | [] -> t, None
           | result -> t, Some (h, result)
@@ -207,19 +207,22 @@ module Learner : sig
   val fresh: unit -> t
   val learn:
     t -> 'a History.t -> ('a -> Merlin_parser.t) -> ('a -> Merlin_lexer.item) -> unit
+
+  val what_about: t -> hash -> HashSet.t
 end = struct
   (* Map a Linewindow hash to a set of parser hashes *)
   type t = (hash, HashSet.t) Hashtbl.t
 
   let fresh () = Hashtbl.create 117
 
+  let what_about t index =
+    try Hashtbl.find t index
+    with Not_found -> HashSet.empty
+
   let register t index hasher =
-    let hashset =
-      try Hashtbl.find t index
-      with Not_found -> HashSet.empty
-    in
+    let hashset = what_about t index in
     let value = Parserhasher.get hasher in
-    Printf.eprintf "REGISTERING HASH %08LX %08LX\n%!" index value;
+    (*Printf.eprintf "REGISTERING HASH %08LX %08LX\n%!" index value;*)
     Hashtbl.replace t index (HashSet.add value hashset)
 
   let all_lines get_item tokens =
@@ -232,7 +235,7 @@ end = struct
     let rec aux window acc = function
       | [] -> flush window acc
       | x :: xs ->
-        let window, line = Linewindow.push window (get_item x) in
+        let window, line = Linewindow.push (get_item x) window in
         aux window (List.cons_option line acc) xs
     in
     let window = Linewindow.fresh ~size:line_window_size in
