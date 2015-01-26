@@ -207,7 +207,8 @@ let line_window_size = 5
 module Learner : sig
   type t
   val fresh: unit -> t
-  val learn: t -> from:(Merlin_lexer.item * Merlin_recover.t) History.t -> unit
+  val learn:
+    t -> 'a History.t -> ('a -> Merlin_parser.t) -> ('a -> Merlin_lexer.item) -> unit
 end = struct
   (* Map a Linewindow hash to a set of parser hashes *)
   type t = (hash, HashSet.t) Hashtbl.t
@@ -223,7 +224,7 @@ end = struct
     Printf.eprintf "REGISTERING HASH %08LX %08LX\n%!" index value;
     Hashtbl.replace t index (HashSet.add value hashset)
 
-  let all_lines tokens =
+  let all_lines get_item tokens =
     let window = Linewindow.fresh ~size:line_window_size in
     let rec flush acc =
       match Linewindow.flush window with
@@ -232,28 +233,29 @@ end = struct
     in
     let rec aux acc = function
       | [] -> flush acc
-      | (item, _recover) :: items ->
-        aux (List.cons_option (Linewindow.push window item) acc) items
+      | x :: xs ->
+        let item = get_item x in
+        aux (List.cons_option (Linewindow.push window item) acc) xs
     in
     aux [] tokens
 
-  let rec find_parser item = function
-    | (_, recover) :: ((item', _) :: _ as tail) when item == item' ->
-      Merlin_recover.parser recover, tail
-    | _ :: tail -> find_parser item tail
+  let rec find_parser get_parser get_item item = function
+    | x0 :: (x1 :: _ as tail) when get_item x1 == item ->
+      get_parser x0, tail
+    | _ :: tail -> find_parser get_parser get_item item tail
     | [] -> assert false
 
-  let rec learn t hasher tail = function
+  let rec learn t get_parser get_item hasher tail = function
     | [] -> ()
     | (_, []) :: _ -> assert false
     | (hash, item :: _) :: lines ->
-      let parser, tail = find_parser item tail in
+      let parser, tail = find_parser get_parser get_item item tail in
       let hasher = Parserhasher.hash parser hasher in
       register t hash hasher;
-      learn t hasher tail lines
+      learn t get_parser get_item hasher tail lines
 
-  let learn t ~from =
-    let tail = History.tail from in
-    let lines = List.drop_n 1 (all_lines tail) in
-    learn t Parserhasher.empty tail lines
+  let learn t history get_parser get_item =
+    let tail = History.tail history in
+    let lines = List.drop_n 1 (all_lines get_item tail) in
+    learn t get_parser get_item Parserhasher.empty tail lines
 end
