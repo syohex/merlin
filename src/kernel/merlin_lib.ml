@@ -434,6 +434,8 @@ end = struct
     Cmi_cache.flush ();
 end
 
+let wisdow = Merlin_student.Learner.fresh ()
+
 module Buffer : sig
   type t
   val create: ?dot_merlins:string list -> ?path:string -> Parser.state -> t
@@ -466,6 +468,8 @@ module Buffer : sig
 
   (* Try to do a background job, return false if nothing has to be done *)
   val idle_job : t -> bool
+
+  val learn : t -> unit
 end = struct
   type t = {
     kind: Parser.state;
@@ -634,4 +638,7 @@ end = struct
     let concr = Env.used_persistent () in
     Types.Concr.exists Printtyp.compute_map_for_pers concr
 
+  let learn t =
+    Merlin_student.Learner.learn wisdow
+      ~from:(History.seek_backward (fun _ -> true) t.recover)
 end

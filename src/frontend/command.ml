@@ -582,6 +582,7 @@ let dispatch (state : state) =
     Project.invalidate ~flush:true (Buffer.project state.buffer)
 
   | (Errors : a request) ->
+    Buffer.learn state.buffer;
     begin
       with_typer state @@ fun typer ->
       Printtyp.wrap_printing_env (Typer.env typer) ~verbosity @@ fun () ->

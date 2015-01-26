@@ -184,7 +184,9 @@ end = struct
           let items = List.rev t.items in
           t.items <- [];
           let h, result = Rollingwindow.push hash (Some items) t.window in
-          Some (h, Option.value ~default:[] result)
+          match result with
+          | None -> None
+          | Some result -> Some (h, result)
 
   let flush t =
     let line, hash = Linehasher.flush t.line in
@@ -217,7 +219,9 @@ end = struct
       try Hashtbl.find t index
       with Not_found -> HashSet.empty
     in
-    Hashtbl.replace t index (HashSet.add (Parserhasher.get hasher) hashset)
+    let value = Parserhasher.get hasher in
+    Printf.eprintf "REGISTERING HASH %08LX %08LX\n%!" index value;
+    Hashtbl.replace t index (HashSet.add value hashset)
 
   let all_lines tokens =
     let window = Linewindow.fresh ~size:line_window_size in
@@ -242,15 +246,14 @@ end = struct
   let rec learn t hasher tail = function
     | [] -> ()
     | (_, []) :: _ -> assert false
-    | (hash, (item :: _ as line)) :: lines ->
+    | (hash, item :: _) :: lines ->
       let parser, tail = find_parser item tail in
       let hasher = Parserhasher.hash parser hasher in
       register t hash hasher;
       learn t hasher tail lines
 
   let learn t ~from =
-    let _, current = History.focused from in
     let tail = History.tail from in
-    let lines = all_lines tail in
+    let lines = List.drop_n 1 (all_lines tail) in
     learn t Parserhasher.empty tail lines
 end
