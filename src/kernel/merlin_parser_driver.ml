@@ -125,6 +125,11 @@ let rec step warnings t token =
         let hashes = Merlin_student.Learner.what_about wisdom hash in
         let recovery = Merlin_recovery.from_parser ~endp t.parser in
         let recovery' = filter_recovery hashes recovery in
+        let tokens = List.rev tokens in
+        let tokens = List.drop_while
+            ~f:(fun item -> (Merlin_lexer.item_start item).Lexing.pos_lnum = endp.Lexing.pos_lnum)
+            tokens
+        in
         let rec aux t recovery' = function
           | Merlin_lexer.Error _ :: tokens -> aux t recovery' tokens
           | [] -> recover_from t (s,tok,e) recovery
@@ -136,7 +141,7 @@ let rec step warnings t token =
             | Normal ->
               List.fold_left ~f:(step warnings) tokens ~init:t
         in
-        aux t recovery' (List.rev tokens)
+        aux t recovery' tokens
     in
     match t.state with
     | Recovering recovery -> recover_from t (s,tok,e) recovery
