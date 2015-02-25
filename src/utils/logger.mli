@@ -50,6 +50,7 @@ module Section : sig
   type t
 
   val of_string : string -> t
+  val of_string_if_existing : string -> t option
   val to_string : t -> string
   val enabled : level -> t -> bool
 

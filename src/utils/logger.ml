@@ -67,6 +67,10 @@ module Section = struct
       !on_create name;
       section
 
+  let of_string_if_existing name =
+    try Some (Hashtbl.find sections name)
+    with Not_found -> None
+
   let general = of_string "general"
   let project_load = of_string "project_load"
 

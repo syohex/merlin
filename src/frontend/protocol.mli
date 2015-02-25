@@ -163,12 +163,24 @@ type _ request =
   | Project_get
     :  (string list * [`Ok | `Failures of (string * exn) list]) request
   | Occurrences
-    : [`Ident_at of position]
+    :  [`Ident_at of position]
     -> Location.t list request
   | Idle_job
-    : bool request
+    :  bool request
+  | Log_section_list
+    :  [`All | `Enabled | `Disabled]
+    -> string list request
+  | Log_start
+    :  string option * Logger.level * string list
+    -> unit request
+  | Log_stop
+    :  string list
+    -> unit request
+  | Log_default_destination
+    :  string
+    -> unit request
   | Version
-    : string request
+    :  string request
 
 type a_request = Request : 'a request -> a_request
 

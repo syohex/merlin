@@ -861,4 +861,26 @@ let dispatch (state : state) =
   | (Idle_job : a request) ->
     Buffer.idle_job state.buffer
 
+  | (Log_section_list status : a request) ->
+    let sections = Logger.Section.list () in
+    let sections = match status with
+      | `All -> sections
+      | `Enabled -> List.filter ~f:Logger.is_monitored sections
+      | `Disabled -> List.filter ~f:(negate Logger.is_monitored) sections
+    in
+    List.map ~f:Logger.Section.to_string sections
+
+  | (Log_start (dest, level, sections) : a request) ->
+     let sections = List.filter_map sections
+         ~f:Logger.Section.of_string_if_existing in
+     List.iter sections ~f:(fun section -> Logger.monitor ?dest section level)
+
+  | (Log_stop sections : a request) ->
+     let sections = List.filter_map sections
+         ~f:Logger.Section.of_string_if_existing in
+     List.iter sections ~f:Logger.forget
+
+  | (Log_default_destination dest : a request) ->
+    Logger.set_default_destination dest
+
   : a)

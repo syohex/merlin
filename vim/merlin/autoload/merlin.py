@@ -752,6 +752,29 @@ def vim_get_flags(var):
   result = " ".join(map(" ".join, result))
   vim.command('let %s = "%s"' % (var, result.replace('"','\\"')))
 
+# Logging setup
+
+def vim_log_to(dest):
+  acquire_buffer()
+  catch_and_print(lambda: command('log', 'to', dest))
+
+def vim_log_list_sections(var, status):
+  # status in ["all","enabled","disabled]
+  acquire_buffer()
+  result = catch_and_print(lambda: command('log', 'list', status))
+  for section in result:
+    vim.command("call add(%s, '%s')" % (var, section))
+
+def vim_log_stop(sections):
+  # status in ["all","enabled","disabled]
+  acquire_buffer()
+  catch_and_print(lambda: command('log', 'stop', sections))
+
+def vim_log_start(level, sections):
+  # level in ["error","info","debug"]
+  acquire_buffer()
+  catch_and_print(lambda: command('log', 'start', level, sections))
+
 # Boundaries
 
 def min_pos(p1, p2):

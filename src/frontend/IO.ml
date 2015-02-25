@@ -410,6 +410,22 @@ module Protocol_io = struct
       Request (Project_get)
     | [`String "version"] ->
       Request (Version)
+    | [`String "log"; `String "list"; `String "all"] ->
+      Request (Log_section_list `All)
+    | [`String "log"; `String "list"; `String "enabled"] ->
+      Request (Log_section_list `Enabled)
+    | [`String "log"; `String "list"; `String "disabled"] ->
+      Request (Log_section_list `Disabled)
+    | [`String "log"; `String "to"; `String name] ->
+      Request (Log_default_destination name)
+    | [`String "log"; `String "start"; `String "error"; `List sections] ->
+      Request (Log_start (None, `error, string_list sections))
+    | [`String "log"; `String "start"; `String "info"; `List sections] ->
+      Request (Log_start (None, `info, string_list sections))
+    | [`String "log"; `String "start"; `String "debug"; `List sections] ->
+      Request (Log_start (None, `debug, string_list sections))
+    | [`String "log"; `String "stop"; `List sections] ->
+      Request (Log_stop (string_list sections))
     | _ -> invalid_arguments ()
 
   let json_of_response = function
@@ -511,6 +527,10 @@ module Protocol_io = struct
           `List (List.map locations
                    ~f:(fun loc -> with_location loc []))
         | Idle_job, b -> `Bool b
+        | Log_section_list _, result -> json_of_string_list result
+        | Log_start _, () -> `Bool true
+        | Log_stop _, () -> `Bool true
+        | Log_default_destination _, () -> `Bool true
         | Version, version ->
           `String version
       end]

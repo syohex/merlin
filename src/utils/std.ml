@@ -769,3 +769,4 @@ module Obj = struct
 end
 
 let (@@) f x = f x
+let negate f x = not (f x)
