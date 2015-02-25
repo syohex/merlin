@@ -582,7 +582,6 @@ let dispatch (state : state) =
     Project.invalidate ~flush:true (Buffer.project state.buffer)
 
   | (Errors : a request) ->
-    Buffer.learn state.buffer;
     begin
       with_typer state @@ fun typer ->
       Printtyp.wrap_printing_env (Typer.env typer) ~verbosity @@ fun () ->
@@ -624,6 +623,8 @@ let dispatch (state : state) =
           List.merge ~cmp err_lexer @@
           List.merge ~cmp err_parser err_typer
         in
+        if errors = [] then
+          Buffer.learn state.buffer;
         Error_report.flood_barrier errors
       with exn -> match Error_report.strict_of_exn exn with
         | None -> raise exn

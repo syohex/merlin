@@ -80,13 +80,15 @@ let drop_comments_after pos comments =
     Lexing.compare_pos loc.Location.loc_end pos <= 0
   )
 
-let filter_recovery hashes (Zipper.Zipper (head, _, tail)) =
+let filter_recovery lexhash hashes (Zipper.Zipper (head, _, tail)) =
   let open Merlin_student in
   let parsers = List.rev_append head tail in
   let hasher = ref Parserhasher.empty in
   let check (_,{Location. txt = parser}) =
     hasher := Parserhasher.hash parser !hasher;
-    let result = HashSet.mem (Parserhasher.get !hasher) hashes in
+    let hash = Parserhasher.get !hasher in
+    Printf.eprintf "lexer(%016LX) parser(%016LX) -> ?\n%!" lexhash hash;
+    let result = HashSet.mem hash hashes in
     if result then prerr_endline "FOUND MATCHING PARSER";
     not result
   in
@@ -121,13 +123,21 @@ let rec step warnings t token =
       let window, line = Merlin_student.Linewindow.push token window in
       match line with
       | None -> {t with state = Learning (endp, tokens, window)}
-      | Some (hash, _) ->
+      | Some (hash, tokens_in_line) ->
         let hashes = Merlin_student.Learner.what_about wisdom hash in
+        Printf.eprintf "%d candidates for lexer(%016LX): %s\n%!"
+          (Merlin_student.HashSet.cardinal hashes)
+          hash
+          (String.concat ", " (Merlin_student.HashSet.fold
+                                 (fun hash lst ->
+                                    Printf.sprintf "%016LX" hash :: lst)
+                                 hashes []));
         let recovery = Merlin_recovery.from_parser ~endp t.parser in
-        let recovery' = filter_recovery hashes recovery in
+        let recovery' = filter_recovery hash hashes recovery in
         let tokens = List.rev tokens in
         let tokens = List.drop_while
-            ~f:(fun item -> (Merlin_lexer.item_start item).Lexing.pos_lnum = endp.Lexing.pos_lnum)
+            ~f:(fun item -> endp.Lexing.pos_lnum =
+                            (Merlin_lexer.item_start item).Lexing.pos_lnum)
             tokens
         in
         let rec aux t recovery' = function
@@ -147,17 +157,22 @@ let rec step warnings t token =
     | Recovering recovery -> recover_from t (s,tok,e) recovery
     | Learning (endp, tokens, window) -> learn_from t endp tokens window
     | Normal ->
-      let token = (s,tok,e) in
-      match Merlin_recovery.feed_normal ~record_comment token t.parser with
+      let token' = (s,tok,e) in
+      match Merlin_recovery.feed_normal ~record_comment token' t.parser with
       | `Reject invalid_parser ->
-        let recovery = Merlin_recovery.from_parser e t.parser in
+        let error = Error_classifier.from invalid_parser token' in
+        learn_from
+          {t with errors = error :: (pop warnings) @ t.errors}
+          e [token]
+          (Merlin_student.linewindow ())
+        (*let recovery = Merlin_recovery.from_parser e t.parser in
         Logger.infojf section ~title:"entering recovery"
           Merlin_recovery.dump recovery;
         let error = Error_classifier.from invalid_parser token in
         recover_from
           {t with errors = error :: (pop warnings) @ t.errors}
           token
-          recovery
+          recovery*)
       | `Step parser ->
         {t with errors = (pop warnings) @ t.errors; parser }
 

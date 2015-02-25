@@ -53,8 +53,8 @@ end = struct
 
   let push item payload {size; hash; tail; head}  =
     let (item', payload'), tail, head = pop tail head in
-    let hash = Rollinghash.remove ~size ~item:item' hash in
     let hash = Rollinghash.push ~item hash in
+    let hash = Rollinghash.remove ~size ~item:item' hash in
     {size; hash; head = (item,payload) :: head; tail}, hash, payload'
 end
 
@@ -97,12 +97,12 @@ end = struct
     match stack with
     | [] -> hstack_fresh frame
     | (top,_) :: _ ->
-      try
+      (*try
         let root = Merlin_parser.root_frame frame top in
         let frames = Merlin_parser.unroll_stack ~from:top ~root in
         let stack = hstack_unroll ~from:stack ~root in
         hstack_push stack frames
-      with Not_found -> hstack_fresh frame
+      with Not_found ->*) hstack_fresh frame
 
   (* hashed parser = hashed stack + current state *)
   type t = int64 * hstack
@@ -111,7 +111,15 @@ end = struct
   let get = fst
   let hash parser (_,hstack) =
     let hstack = hstack_update hstack (stack parser) in
-    push_state (hstack_hash hstack) ~lr1:(get_lr1_state parser), hstack
+    let hash = push_state (hstack_hash hstack) ~lr1:(get_lr1_state parser) in
+    let states = List.map
+        (fun (f,_) -> string_of_int (Merlin_parser.Frame.lr1_state f))
+        hstack
+    in
+    Printf.eprintf "parser(%016LX) = %d[%s]\n"
+      hash (get_lr1_state parser)
+      (String.concat "," states);
+    hash, hstack
 end
 
 (* Linehasher, hash tokens on the same line *)
@@ -170,29 +178,36 @@ end = struct
     Raw_parser_values.(class_of_symbol (symbol_of_token token))
 
   let push item t =
-    let items = item :: t.items in
     match item with
-    | Merlin_lexer.Error _ -> {t with items}, None
+    | Merlin_lexer.Error _ -> {t with items = item :: t.items}, None
     | Merlin_lexer.Valid (startp, token, _) ->
       match token_class token with
       | Raw_parser_values.CN_ _ -> assert false
       | Raw_parser_values.CT_ (tc, _) ->
         let line, h = Linehasher.push startp tc t.line in
         match h with
-        | None -> {t with items; line}, None
+        | None -> {t with items = item :: t.items; line}, None
         | Some hash ->
-          let items = List.rev items in
+          let items = List.rev t.items in
           let window, h, result = Rollingwindow.push hash items t.window in
-          let t = {items = []; window; line} in
+          let t = {items = [item]; window; line} in
           match result with
           | [] -> t, None
-          | result -> t, Some (h, result)
+          | result ->
+            let tokens = List.map ~f:(function
+                | Merlin_lexer.Error _ -> "*err*"
+                | Merlin_lexer.Valid (_,tok,_) ->
+                  Raw_parser_values.(string_of_class (class_of_symbol (symbol_of_token tok)))
+              ) result
+            in
+            Printf.eprintf "Linewindow: lexer(%016LX) -> %s\n%!" h (String.concat " " tokens);
+            t, Some (h, result)
 
   let flush t =
     let line, hash = Linehasher.flush t.line in
     let items = List.rev t.items in
     let window, h, result = Rollingwindow.push hash items t.window in
-    {line; items; window}, (h, result)
+    {line; items = []; window}, (h, result)
 end
 
 module HashSet = Set.Make (struct
@@ -200,7 +215,8 @@ module HashSet = Set.Make (struct
     let compare = Int64.compare
   end)
 
-let line_window_size = 5
+let linewindow_size = 5
+let linewindow () = Linewindow.fresh ~size:linewindow_size
 
 module Learner : sig
   type t
@@ -222,7 +238,7 @@ end = struct
   let register t index hasher =
     let hashset = what_about t index in
     let value = Parserhasher.get hasher in
-    (*Printf.eprintf "REGISTERING HASH %08LX %08LX\n%!" index value;*)
+    Printf.eprintf "parser(%016LX) @ lexer(%016LX)\n%!" value index;
     Hashtbl.replace t index (HashSet.add value hashset)
 
   let all_lines get_item tokens =
@@ -238,7 +254,7 @@ end = struct
         let window, line = Linewindow.push (get_item x) window in
         aux window (List.cons_option line acc) xs
     in
-    let window = Linewindow.fresh ~size:line_window_size in
+    let window = linewindow () in
     aux window [] tokens
 
   let rec find_parser get_parser get_item item = function
