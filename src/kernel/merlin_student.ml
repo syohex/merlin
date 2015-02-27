@@ -51,11 +51,11 @@ end = struct
         item, tail, []
       | [] -> assert false
 
-  let push item payload {size; hash; tail; head}  =
+  let push item payload {size; hash = oldhash; tail; head}  =
     let (item', payload'), tail, head = pop tail head in
-    let hash = Rollinghash.push ~item hash in
+    let hash = Rollinghash.push ~item oldhash in
     let hash = Rollinghash.remove ~size ~item:item' hash in
-    {size; hash; head = (item,payload) :: head; tail}, hash, payload'
+    {size; hash; head = (item,payload) :: head; tail}, oldhash, payload'
 end
 
 (* Incremental hashing of a menhir parser *)
@@ -99,9 +99,9 @@ end = struct
     | (top,_) :: _ ->
       (*try
         let root = Merlin_parser.root_frame frame top in
-        let frames = Merlin_parser.unroll_stack ~from:top ~root in
-        let stack = hstack_unroll ~from:stack ~root in
-        hstack_push stack frames
+        hstack_push
+          (hstack_unroll ~from:stack ~root)
+          (Merlin_parser.unroll_stack ~from:top ~root)
       with Not_found ->*) hstack_fresh frame
 
   (* hashed parser = hashed stack + current state *)
@@ -200,7 +200,7 @@ end = struct
                   Raw_parser_values.(string_of_class (class_of_symbol (symbol_of_token tok)))
               ) result
             in
-            Printf.eprintf "Linewindow: lexer(%016LX) -> %s\n%!" h (String.concat " " tokens);
+            Printf.eprintf "lexer(%016LX) = %s\n%!" h (String.concat " " tokens);
             t, Some (h, result)
 
   let flush t =
