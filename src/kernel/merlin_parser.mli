@@ -88,6 +88,9 @@ end
 val dump : t -> Std.json
 val dump_frame : frame -> Std.json
 
+val dump_item : int * int -> Std.json
+val dump_itemset : (int * int) list -> Std.json
+
 (** [find_marker] return the first frame that might be unsafe for the parser *)
 val find_marker : t -> frame option
 

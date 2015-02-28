@@ -141,9 +141,12 @@ let dump_itemset l =
 let dump_frame frame =
   let v = Frame.value frame in
   let position = (Frame.location frame).Location.loc_start in
+  let lr0 = Frame.lr0_state frame in
   `Assoc [
     "position", Lexing.json_of_position position;
     "content", `String (Values.(string_of_class (class_of_symbol v)));
+    "lr0", `Int lr0;
+    "itemset", dump_itemset (P.Query.itemset lr0);
   ]
 
 let rec dump_stack acc = function

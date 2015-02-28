@@ -655,6 +655,9 @@ let dispatch (state : state) =
   | (Dump `Recover : a request) ->
     Driver.dump_recoverable (Buffer.parser_driver state.buffer);
 
+  | (Dump (`Itemset lr0) : a request) ->
+    Merlin_parser.dump_itemset (Raw_parser.Query.itemset lr0)
+
   | (Dump (`Env (kind, pos)) : a request) ->
     with_typer state @@ fun typer ->
     let env = match pos with

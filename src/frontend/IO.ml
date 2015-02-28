@@ -357,6 +357,8 @@ module Protocol_io = struct
       Request (Dump `Recover)
     | [`String "dump"; `String "exn"] ->
       Request (Dump `Exn)
+    | [`String "dump"; `String "itemset"; `Int n] ->
+      Request (Dump (`Itemset n))
     | [`String "dump"; `String "browse"] ->
       Request (Dump `Browse)
     | [`String "dump"; `String "typer"; `String "input"] ->
