@@ -153,6 +153,8 @@ def command(*cmd):
   return merlin_process().command(*cmd)
 
 def dump(*cmd):
+  p = subprocess.Popen(['json-viewer'], stdin=subprocess.PIPE)
+  p.communicate(input=json.dumps(command('dump', *cmd)))
   print(json.dumps(command('dump', *cmd)))
 
 def dump_to_file(path, *cmd):

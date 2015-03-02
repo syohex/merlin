@@ -95,12 +95,20 @@ val dump_itemset : (int * int) list -> Std.json
 val find_marker : t -> frame option
 
 (** [has_marker ?diff t f] returns true iff f is still in t stack.
-    If provided, [diff] is used to speed-up the search (amortized constant time),
-    assuming that [diff] is the same parser as [t] with one more or one less
-    token fed. *)
+    If provided, [diff] is used to speed-up the search
+    (amortized constant time), assuming that [diff] is the same parser as [t]
+    with one more or one less token fed. *)
 val has_marker : ?diff:(t * bool) -> t -> frame -> bool
 
 (** Raise [Not_found] if no frame match *)
 val root_frame : frame -> frame -> frame
 
 val unroll_stack : from:frame -> root:frame -> frame list
+
+(** Observable states: the ones that matter when you're interested in
+    identifying two parser configurations recognizing the same language
+    (but with eventually different pasts) *)
+type observable_states
+val observable_states :
+  ?previous:observable_states -> frame -> observable_states
+val
