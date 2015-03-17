@@ -177,8 +177,11 @@ let explain parser =
     match Merlin_parser.get_lr0_states parser with
     | List.Lazy.Nil -> assert false
     | List.Lazy.Cons (lr0, (lazy next)) ->
-      let reducing_to, expected, _ = lr0_annotations lr0 in
-      close_expected expected reducing_to next
+      match Merlin_recovery_explain_transition.suggested_transitions lr0 with
+      | [] ->
+        let reducing_to, expected, _ = lr0_annotations lr0 in
+        close_expected expected reducing_to next
+      | expected -> expected
   in
   Logger.infojf section ~title:"syntax error explanation expected symbols"
     (fun expected ->

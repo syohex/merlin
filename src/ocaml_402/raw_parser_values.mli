@@ -53,6 +53,7 @@ type symbol = Raw_parser.symbol =
   | Bottom
 
 val class_of_symbol: symbol -> symbol_class
+val class_of_string: string -> symbol_class
 
 val string_of_class: symbol_class -> string
 
