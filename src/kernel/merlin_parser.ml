@@ -34,6 +34,7 @@ module P = Raw_parser
 module E = MenhirLib.EngineTypes
 
 let section = Logger.section "parser"
+let transition_section = Logger.section "transition"
 
 type state = Raw_parser.state
 
@@ -102,27 +103,6 @@ let get_location ?pop t =
 let get_guide ?pop t =
   let loc = get_location ?pop t in
   loc.Location.loc_start
-
-let rec of_step s =
-  match P.step s with
-  | `Accept _ as result -> result
-  | `Reject p ->
-    `Reject (Obj.magic p : t)
-  | `Feed p -> `Step p
-  | `Step p -> of_step p
-
-let from state input =
-  match of_step (P.initial state input) with
-  | `Step p -> p
-  | _ -> assert false
-
-let feed (s,t,e as input) ?(record_comment=ignore) parser =
-  match t with
-  (* Ignore comments *)
-  | P.COMMENT c ->
-    record_comment c ;
-    `Step parser
-  | _ -> of_step (P.feed parser input)
 
 let dump_item (prod, dot_pos) =
   let lhs, rhs = P.Query.production_definition prod in
@@ -219,72 +199,6 @@ let parser_priority p =
   let symbol = Frame.value (stack p) in
   let symcls = Values.class_of_symbol symbol in
   Values.selection_priority symcls
-
-let rec recover ?endp termination parser =
-  let open Merlin_recovery_strategy in
-  match find_strategies parser with
-  | [] -> None
-  | strat :: _ ->
-  match Termination.check strat parser termination with
-  | parser, termination, false ->
-    recover ?endp termination parser
-  | parser, termination, true ->
-    (* Feed stack *)
-    match strat.action with
-    | `Reduce {r_prod; r_symbols; r_action} ->
-      let env = parser.P.env in
-      let add_symbol endp stack symbol =
-        {stack with E. semv = symbol; startp = stack.E.endp; endp; next = stack}
-      in
-      let add_symbol = match endp with
-        | Some endp -> add_symbol endp
-        | None -> (fun stack -> add_symbol stack.E.endp stack)
-      in
-      let stack = List.fold_left ~f:add_symbol ~init:env.E.stack r_symbols in
-      let env = {env with E. stack} in
-      (* Reduce stack *)
-      (* FIXME: action can raise an error. We should catch it and fallback to
-         another strategy *)
-      let stack = r_action env in
-      let env = {env with E. stack} in
-
-      (* Follow goto transition *)
-      (* FIXME: Rework menhir interface to expose appopriate primitives *)
-      let module M = MenhirLib in
-      let module T = P.MenhirInterpreterTable in
-      let unmarshal2 table i j =
-        M.RowDisplacement.getget
-          M.PackedIntArray.get
-          M.PackedIntArray.get
-          table
-          i j
-      in
-      let goto state prod =
-        let code = unmarshal2 T.goto state (M.PackedIntArray.get T.lhs prod) in
-        (* code = 1 + state *)
-        code - 1
-      in
-      let env = {env with E. current = goto stack.E.state r_prod} in
-
-      (* Construct parser *)
-      let parser = {parser with P. env} in
-      let priority = parser_priority parser in
-      let parser = Location.mkloc parser (get_location parser) in
-      Some (termination, (priority, parser))
-
-    | `Shift (pop,token,priority) ->
-      let loc = get_location parser in
-      let token =
-        let startp = loc.Location.loc_end in
-        let endp = Option.value ~default:startp endp in
-        (startp,token,endp)
-      in
-      let loc = Parsing_aux.location_union (get_location ~pop parser) loc in
-      match feed token parser with
-      | `Accept _ | `Reject _ -> None
-      | `Step parser ->
-        let parser = Location.mkloc parser loc in
-        Some (termination, (priority, parser))
 
 let get_lr0_states parser =
   List.Lazy.Cons (get_lr0_state parser, lazy begin
@@ -401,3 +315,116 @@ let rec unroll_stack acc s' s =
       unroll_stack (s :: acc) s' next
 
 let unroll_stack ~from ~root = unroll_stack [] root from
+
+(* Feeding *)
+
+let print_transition f1 f2 =
+  let state_1 = Frame.lr0_state f1 in
+  let state_2 = Frame.lr0_state f2 in
+  let cls_2 = Raw_parser_values.string_of_class
+      (Raw_parser_values.class_of_symbol (Frame.value f2)) in
+  Logger.infoj transition_section ~title:"transition" (`Assoc [
+      "from",  `Int state_1;
+      "to",    `Int state_2;
+      "class", `String cls_2;
+    ]);
+  f2
+
+let calc_diff p p' =
+  match root_frame p p' with
+  | exception Not_found -> ()
+  | root ->
+    let frames = unroll_stack ~from:p' ~root in
+    ignore (List.fold_left ~f:print_transition ~init:root frames : frame)
+
+let rec of_step s =
+  match P.step s with
+  | `Accept _ as result -> result
+  | `Reject p ->
+    `Reject (Obj.magic p : t)
+  | `Feed p ->
+    calc_diff (stack s) (stack p);
+    `Step p
+  | `Step p ->
+    calc_diff (stack s) (stack p);
+    of_step p
+
+let from state input =
+  match of_step (P.initial state input) with
+  | `Step p -> p
+  | _ -> assert false
+
+let feed (s,t,e as input) ?(record_comment=ignore) parser =
+  match t with
+  (* Ignore comments *)
+  | P.COMMENT c ->
+    record_comment c ;
+    `Step parser
+  | _ -> of_step (P.feed parser input)
+
+let rec recover ?endp termination parser =
+  let open Merlin_recovery_strategy in
+  match find_strategies parser with
+  | [] -> None
+  | strat :: _ ->
+  match Termination.check strat parser termination with
+  | parser, termination, false ->
+    recover ?endp termination parser
+  | parser, termination, true ->
+    (* Feed stack *)
+    match strat.action with
+    | `Reduce {r_prod; r_symbols; r_action} ->
+      let env = parser.P.env in
+      let add_symbol endp stack symbol =
+        {stack with E. semv = symbol; startp = stack.E.endp; endp; next = stack}
+      in
+      let add_symbol = match endp with
+        | Some endp -> add_symbol endp
+        | None -> (fun stack -> add_symbol stack.E.endp stack)
+      in
+      let stack = List.fold_left ~f:add_symbol ~init:env.E.stack r_symbols in
+      let env = {env with E. stack} in
+      (* Reduce stack *)
+      (* FIXME: action can raise an error. We should catch it and fallback to
+         another strategy *)
+      let stack = r_action env in
+      let env = {env with E. stack} in
+
+      (* Follow goto transition *)
+      (* FIXME: Rework menhir interface to expose appopriate primitives *)
+      let module M = MenhirLib in
+      let module T = P.MenhirInterpreterTable in
+      let unmarshal2 table i j =
+        M.RowDisplacement.getget
+          M.PackedIntArray.get
+          M.PackedIntArray.get
+          table
+          i j
+      in
+      let goto state prod =
+        let code = unmarshal2 T.goto state (M.PackedIntArray.get T.lhs prod) in
+        (* code = 1 + state *)
+        code - 1
+      in
+      let env = {env with E. current = goto stack.E.state r_prod} in
+
+      (* Construct parser *)
+      let parser = {parser with P. env} in
+      let priority = parser_priority parser in
+      let parser = Location.mkloc parser (get_location parser) in
+      Some (termination, (priority, parser))
+
+    | `Shift (pop,token,priority) ->
+      let loc = get_location parser in
+      let token =
+        let startp = loc.Location.loc_end in
+        let endp = Option.value ~default:startp endp in
+        (startp,token,endp)
+      in
+      let loc = Parsing_aux.location_union (get_location ~pop parser) loc in
+      match feed token parser with
+      | `Accept _ | `Reject _ -> None
+      | `Step parser ->
+        let parser = Location.mkloc parser loc in
+        Some (termination, (priority, parser))
+
