@@ -2,6 +2,8 @@ open Std
 
 type hash = int64
 
+let section = Logger.section "student"
+
 (* Compute a rolling hash *)
 module Rollinghash : sig
   val empty : hash
@@ -112,13 +114,18 @@ end = struct
   let hash parser (_,hstack) =
     let hstack = hstack_update hstack (stack parser) in
     let hash = push_state (hstack_hash hstack) ~lr1:(get_lr1_state parser) in
-    let states = List.map
-        (fun (f,_) -> string_of_int (Merlin_parser.Frame.lr1_state f))
-        hstack
-    in
-    Printf.eprintf "parser(%016LX) = %d[%s]\n"
-      hash (get_lr1_state parser)
-      (String.concat "," states);
+    Logger.infojf section ~title:"Parserhasher.hash"
+      (fun (hash,parser,hstack) ->
+         let states = List.map
+             (fun (f,_) -> `Int (Merlin_parser.Frame.lr1_state f))
+             hstack
+         in
+         `Assoc [
+           "parser", `String (sprintf "%016LX" hash);
+           "lr1",    `Int (get_lr1_state parser);
+           "states", `List states;
+         ])
+      (hash,parser,hstack);
     hash, hstack
 end
 
@@ -194,13 +201,20 @@ end = struct
           match result with
           | [] -> t, None
           | result ->
-            let tokens = List.map ~f:(function
-                | Merlin_lexer.Error _ -> "*err*"
-                | Merlin_lexer.Valid (_,tok,_) ->
-                  Raw_parser_values.(string_of_class (class_of_symbol (symbol_of_token tok)))
-              ) result
-            in
-            Printf.eprintf "lexer(%016LX) = %s\n%!" h (String.concat " " tokens);
+            Logger.infojf section ~title:"Linewindow.push"
+              (fun (h,result) ->
+                 let token =
+                   let open Raw_parser_values in function
+                     | Merlin_lexer.Error _ -> `String "*err*"
+                     | Merlin_lexer.Valid (_,tok,_) ->
+                       `String ((string_of_class
+                                   (class_of_symbol (symbol_of_token tok))))
+                 in
+                 `Assoc [
+                   "lexer", `String (sprintf "%016LX" h);
+                   "tokens", `List (List.map ~f:token result);
+                 ])
+              (h,result);
             t, Some (h, result)
 
   let flush t =
@@ -238,7 +252,12 @@ end = struct
   let register t index hasher =
     let hashset = what_about t index in
     let value = Parserhasher.get hasher in
-    Printf.eprintf "parser(%016LX) @ lexer(%016LX)\n%!" value index;
+    Logger.infojf section ~title:"Learner.register"
+      (fun (value,index) -> `Assoc [
+           "parser", `String (sprintf "%016LX" value);
+           "lexer", `String (sprintf "%016LX" index);
+         ])
+      (value,index);
     Hashtbl.replace t index (HashSet.add value hashset)
 
   let all_lines get_item tokens =

@@ -108,7 +108,6 @@ val unroll_stack : from:frame -> root:frame -> frame list
 (** Observable states: the ones that matter when you're interested in
     identifying two parser configurations recognizing the same language
     (but with eventually different pasts) *)
-type observable_states
-val observable_states :
-  ?previous:observable_states -> frame -> observable_states
-val
+(*type observable_states
+  val observable_states :
+  ?previous:observable_states -> frame -> observable_states*)

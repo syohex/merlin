@@ -30,6 +30,7 @@ open Std
 open Raw_parser
 
 let section = Logger.section "parser_driver"
+let learner_section = Logger.section "parser_learner"
 
 let candidate_pos (_,{Location.txt = _; loc}) =
   Lexing.split_pos loc.Location.loc_start
@@ -87,9 +88,13 @@ let filter_recovery lexhash hashes (Zipper.Zipper (head, _, tail)) =
   let check (_,{Location. txt = parser}) =
     hasher := Parserhasher.hash parser !hasher;
     let hash = Parserhasher.get !hasher in
-    Printf.eprintf "lexer(%016LX) parser(%016LX) -> ?\n%!" lexhash hash;
+    Logger.infojf learner_section ~title:"filter_recovery_hash"
+      (fun (lexhash, hash) -> `String
+          (sprintf "lexer(%016LX) parser(%016LX) -> ?\n%!" lexhash hash))
+      (lexhash,hash);
     let result = HashSet.mem hash hashes in
-    if result then prerr_endline "FOUND MATCHING PARSER";
+    Logger.infoj learner_section ~title:"filter_recovery_found"
+      (`Bool result);
     not result
   in
   let parsers = List.take_while ~f:check parsers in
@@ -125,13 +130,16 @@ let rec step warnings t token =
       | None -> {t with state = Learning (endp, tokens, window)}
       | Some (hash, tokens_in_line) ->
         let hashes = Merlin_student.Learner.what_about wisdom hash in
-        Printf.eprintf "%d candidates for lexer(%016LX): %s\n%!"
-          (Merlin_student.HashSet.cardinal hashes)
-          hash
-          (String.concat ", " (Merlin_student.HashSet.fold
-                                 (fun hash lst ->
-                                    Printf.sprintf "%016LX" hash :: lst)
-                                 hashes []));
+        Logger.infojf learner_section ~title:"learn_from" (fun (hashes,hash) ->
+            `Assoc [
+              "candidate_count", `Int (Merlin_student.HashSet.cardinal hashes);
+              "lexer", `String (sprintf "%016LX" hash);
+              "candidates", `List
+                (Merlin_student.HashSet.fold (fun hash lst ->
+                     `String (sprintf "%016LX" hash) :: lst)
+                    hashes [])
+            ])
+          (hashes,hash);
         let recovery = Merlin_recovery.from_parser ~endp t.parser in
         let recovery' = filter_recovery hash hashes recovery in
         let tokens = List.rev tokens in
