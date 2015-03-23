@@ -318,24 +318,30 @@ let unroll_stack ~from ~root = unroll_stack [] root from
 
 (* Feeding *)
 
-let print_transition f1 f2 =
+let print_state_transition f1 state_2 =
   let state_1 = Frame.lr0_state f1 in
-  let state_2 = Frame.lr0_state f2 in
-  let cls_2 = Raw_parser_values.string_of_class
-      (Raw_parser_values.class_of_symbol (Frame.value f2)) in
+  let cls_1 = Raw_parser_values.string_of_class
+      (Raw_parser_values.class_of_symbol (Frame.value f1)) in
   Logger.infoj transition_section ~title:"transition" (`Assoc [
       "from",  `Int state_1;
       "to",    `Int state_2;
-      "class", `String cls_2;
-    ]);
+      "class", `String cls_1;
+    ])
+
+let print_transition f1 f2 =
+  let state_2 = Frame.lr0_state f2 in
+  print_state_transition f1 state_2;
   f2
 
-let calc_diff p p' =
-  match root_frame p p' with
+let calc_diff s p' =
+  let s' = stack p' in
+  match root_frame s s' with
   | exception Not_found -> ()
   | root ->
-    let frames = unroll_stack ~from:p' ~root in
-    ignore (List.fold_left ~f:print_transition ~init:root frames : frame)
+    let frames = unroll_stack ~from:s' ~root in
+    print_state_transition
+      (List.fold_left ~f:print_transition ~init:root frames : frame)
+      (get_lr0_state p')
 
 let rec of_step s =
   match P.step s with
@@ -343,10 +349,10 @@ let rec of_step s =
   | `Reject p ->
     `Reject (Obj.magic p : t)
   | `Feed p ->
-    calc_diff (stack s) (stack p);
+    calc_diff (stack s) p;
     `Step p
   | `Step p ->
-    calc_diff (stack s) (stack p);
+    calc_diff (stack s) p;
     of_step p
 
 let from state input =
