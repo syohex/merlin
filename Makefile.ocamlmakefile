@@ -28,6 +28,8 @@ SOURCES = \
 	src/utils/terminfo.mli            \
 	src/utils/terminfo.ml             \
 	src/utils/std.ml                  \
+	src/utils/ztrie.mli               \
+	src/utils/ztrie.ml                \
 	src/utils/misc.mli                \
 	src/utils/misc.ml                 \
 	src/utils/file_cache.mli          \
