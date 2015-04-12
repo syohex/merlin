@@ -314,7 +314,6 @@ end
 module type VALUE = sig
   type t
   val empty: t
-  val is_empty: t -> bool
 end
 
 module ZTrie (Branch : BRANCH) (V : VALUE) :
@@ -326,6 +325,7 @@ sig
   val get: t -> V.t
   val set: t -> V.t -> t
 
+  val find: t -> Branch.t -> t * Branch.t
   val position: t -> Branch.t
 end =
 struct
@@ -342,6 +342,7 @@ struct
   type t = {
     path: (node * Branch.index) list;
     branch: Branch.t;
+    miss: Branch.t;
     node: node;
   }
 
@@ -349,13 +350,12 @@ struct
     children = Map.empty;
     value = V.empty;
   }
-  let is_empty_node n = Map.is_empty n.children && V.is_empty n.value
 
   let get t = t.node.value
   let set t v = {t with node = {t.node with value = v}}
 
   let empty = { path = []; node = empty_node;
-                branch = Branch.root }
+                branch = Branch.root; miss = Branch.root; }
 
   let rec move_up count node = function
     | path when count = 0 ->
@@ -365,21 +365,11 @@ struct
       move_up (count - 1) node' path'
     | [] -> assert false
 
-  let rec clean_up count = function
-    | path when count = 0 ->
-      path, empty_node
-    | (node',key) :: path' ->
-      let node' = {node' with children = Map.remove key node'.children} in
-      if is_empty_node node' then
-        clean_up (count - 1) path'
-      else
-        move_up (count - 1) node' path'
-    | [] -> assert false
-
+  exception Miss
   let move_up t depth =
     let count = Branch.depth t.branch - depth in
-    if is_empty_node t.node then
-      clean_up count t.path
+    if count < 0 then
+      raise Miss
     else
       move_up count t.node t.path
 
@@ -402,23 +392,38 @@ struct
       | exception Not_found ->
         path, node, bs
 
-  let move_to t branch =
-    let depth = Branch.ancestor_depth t.branch branch in
+  let move_to t branch_hint branch =
+    let depth = Branch.ancestor_depth branch_hint branch in
     let up_path, node = move_up t depth in
     let down_path = unroll branch depth in
     go_down up_path node down_path
 
+  let find t target =
+    match move_to t t.miss target with
+    | path, node, remaining ->
+      let branch =
+        match remaining with
+        | [] -> target
+        | child :: _ -> match Branch.parent child with
+          | None -> assert false
+          | Some branch' -> branch'
+      in
+      { path; node; branch; miss = target}, branch
+    | exception Miss -> {t with miss = target}, t.branch
+
   let seek t branch =
-    let path, node, remaining = move_to t branch in
-    let path, node =
-      match remaining with
-      | [] -> path, node
-      | branch :: branches ->
-        let path' = List.map ~f:(fun b -> empty_node, Branch.index b) branches in
-        let path = List.rev_append path' ((node, Branch.index branch) :: path) in
-        List.tl path, empty_node
-    in
-    { path; node; branch }
+    match move_to t t.branch branch with
+    | path, node, remaining ->
+      let path, node =
+        match remaining with
+        | [] -> path, node
+        | branch :: branches ->
+          let path' = List.map ~f:(fun b -> empty_node, Branch.index b) branches in
+          let path = List.rev_append path' ((node, Branch.index branch) :: path) in
+          List.tl path, empty_node
+      in
+      { path; node; branch; miss = branch }
+    | exception Miss -> {t with miss = branch}
 
   let position t = t.branch
 end
