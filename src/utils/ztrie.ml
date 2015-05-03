@@ -19,6 +19,50 @@ module type VALUE = sig
   val empty: t
 end
 
+module type S = sig
+  type branch
+  type value
+
+  type t
+  val empty: t
+
+  val seek: t -> branch -> t
+  val get: t -> value
+  val set: t -> value -> t
+
+  val find: t -> branch -> t * branch
+  val position: t -> branch
+end
+
+module Validate (Branch : BRANCH) =
+struct
+  type index' = Branch.index
+
+  include (Branch :
+             module type of struct include Branch end
+           with type index := index')
+
+  let () = assert (depth root = 0)
+
+  let parent t =
+    let result = parent t in
+    begin match result with
+    | Some t' -> assert (depth t = depth t' + 1)
+    | None -> assert (depth t = 0)
+    end;
+    result
+
+  type index = index' * int
+  let index t =
+    let depth = Branch.depth t in
+    assert (depth > 0);
+    index t, depth
+
+  let compare (i1,d1) (i2,d2) =
+    assert (d1 = d2);
+    compare i1 i2
+end
+
 module Make (Branch : BRANCH) (V : VALUE) =
 struct
   module Map = Map.Make(struct
@@ -77,12 +121,12 @@ struct
 
   let rec go_down path node = function
     | [] -> path, node, []
-    | branch :: bs ->
+    | branch :: bs as branches ->
       let index = Branch.index branch in
       match Map.find index node.children with
       | node' -> go_down ((node, index) :: path) node' bs
       | exception Not_found ->
-        path, node, bs
+        path, node, branches
 
   let move_to t branch_hint branch =
     let depth = Branch.ancestor_depth branch_hint branch in
@@ -93,15 +137,20 @@ struct
   let find t target =
     match move_to t t.miss target with
     | path, node, remaining ->
-      let branch =
-        match remaining with
+      let branch = match remaining with
         | [] -> target
-        | child :: _ -> match Branch.parent child with
+        | child :: _ ->
+          match Branch.parent child with
           | None -> assert false
-          | Some branch' -> branch'
+          | Some branch -> branch
       in
-      { path; node; branch; miss = target}, branch
+      {path; node; branch; miss = target}, branch
     | exception Miss -> {t with miss = target}, t.branch
+
+  let rec mkdirs path = function
+    | branch :: branches ->
+      mkdirs ((empty_node,Branch.index branch) :: path) branches
+    | [] -> path
 
   let seek t branch =
     match move_to t t.branch branch with
@@ -110,12 +159,11 @@ struct
         match remaining with
         | [] -> path, node
         | branch :: branches ->
-          let path' = List.map ~f:(fun b -> empty_node, Branch.index b) branches in
-          let path = List.rev_append path' ((node, Branch.index branch) :: path) in
-          List.tl path, empty_node
+          mkdirs ((node, Branch.index branch) :: path) branches,
+          empty_node
       in
-      { path; node; branch; miss = branch }
-    | exception Miss -> {t with miss = branch}
+      {path; node; branch; miss = branch}
+    | exception Miss -> assert false
 
   let position t = t.branch
 end

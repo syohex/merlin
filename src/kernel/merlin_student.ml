@@ -60,75 +60,6 @@ end = struct
     {size; hash; head = (item,payload) :: head; tail}, oldhash, payload'
 end
 
-(* Incremental hashing of a menhir parser *)
-module Parserhasher : sig
-  type t
-  val empty : t
-  val hash : Merlin_parser.t -> t -> t
-  val get : t -> int64
-end = struct
-  open Merlin_parser
-
-  let push_state hash ~lr1 =
-    Rollinghash.push ~item:(Hashlut.small_int lr1) hash
-
-  (* hashed stack *)
-  type hstack = (frame * int64) list
-  let hstack_hash = function
-    | [] -> 0L
-    | (_,h) :: _ -> h
-
-  let rec hstack_push stack h = function
-    | [] -> stack
-    | f :: fs ->
-      let h = push_state h ~lr1:(Frame.lr1_state f) in
-      hstack_push ((f,h) :: stack) h fs
-
-  let hstack_push stack frames =
-    hstack_push stack (hstack_hash stack) frames
-
-  let rec hstack_unroll ~from ~root = match from with
-    | [] -> raise Not_found
-    | (x, _) :: _ when Frame.eq x root -> from
-    | _ :: from -> hstack_unroll ~from ~root
-
-  let hstack_fresh frame =
-    hstack_push [] (List.rev_unfold [frame] ~f:Frame.next frame)
-
-  let hstack_update stack frame =
-    match stack with
-    | [] -> hstack_fresh frame
-    | (top,_) :: _ ->
-      (*try
-        let root = Merlin_parser.root_frame frame top in
-        hstack_push
-          (hstack_unroll ~from:stack ~root)
-          (Merlin_parser.unroll_stack ~from:top ~root)
-      with Not_found ->*) hstack_fresh frame
-
-  (* hashed parser = hashed stack + current state *)
-  type t = int64 * hstack
-
-  let empty = 0L, []
-  let get = fst
-  let hash parser (_,hstack) =
-    let hstack = hstack_update hstack (stack parser) in
-    let hash = push_state (hstack_hash hstack) ~lr1:(get_lr1_state parser) in
-    Logger.infojf section ~title:"Parserhasher.hash"
-      (fun (hash,parser,hstack) ->
-         let states = List.map
-             (fun (f,_) -> `Int (Merlin_parser.Frame.lr1_state f))
-             hstack
-         in
-         `Assoc [
-           "parser", `String (sprintf "%016LX" hash);
-           "lr1",    `Int (get_lr1_state parser);
-           "states", `List states;
-         ])
-      (hash,parser,hstack);
-    hash, hstack
-end
-
 (* Linehasher, hash tokens on the same line *)
 module Linehasher : sig
   type t
@@ -232,33 +163,130 @@ module HashSet = Set.Make (struct
 let linewindow_size = 5
 let linewindow () = Linewindow.fresh ~size:linewindow_size
 
+(* Incremental hashing of a menhir parser *)
+module Parserhasher = struct
+  open Merlin_parser
+
+  type hash = int * int list
+
+  type t = (hash * frame) list
+
+  let empty : t = []
+  let root : hash = 0, []
+
+  let get (x : t) : hash = match x with
+    | [] -> assert false
+    | (hash,_) :: _ -> hash
+
+  let drop_nonobservable = function
+    | n, (x :: xs)
+      when not (Merlin_recovery_strategy.observable_lr0_state x) ->
+      n - 1, xs
+    | xs -> xs
+
+  let add (xxs : t) (f : frame) =
+    let nk = match xxs with
+      | [] -> root
+      | (xs,f) :: _ -> xs
+    in
+    let n, k = drop_nonobservable nk in
+    let nk' = n + 1, Frame.lr0_state f :: k in
+    (nk', f) :: xxs
+
+  let rec fresh (f : frame) =
+    match Frame.next f with
+    | None -> add [] f
+    | Some f' -> add (fresh f') f
+
+  let update (f : frame) (x : t) : t =
+    try match x with
+    | [] -> raise Not_found
+    | (br, f') :: _ ->
+      let root = root_frame f f' in
+      let rec backtrack = function
+        | ((_, f') :: _ as t) when Frame.eq f' root -> t
+        | _ :: t -> backtrack t
+        | [] -> assert false
+      in
+      List.fold_left ~f:add ~init:(backtrack x)
+        (unroll_stack ~from:f ~root)
+    with Not_found -> fresh f
+end
+
+module Branch : Ztrie.BRANCH with type t = Parserhasher.hash = struct
+  type t = Parserhasher.hash
+  let parent (n,xs) = match xs with
+    | [] -> None
+    | _ :: xs' -> Some ((n - 1), xs')
+
+  let depth = fst
+
+  let root = Parserhasher.root
+
+  let ancestor_depth (n1,l1) (n2,l2) =
+    let n, l1, l2 =
+      if n1 = n2 then
+        n1, l1, l2
+      else if n1 > n2 then
+        n2, List.drop_n (n1 - n2) l1, l2
+      else
+        n1, l1, List.drop_n (n2 - n1) l2
+    in
+    let rec pop n l1 l2 = if l1 == l2 then n else match l1, l2 with
+        | _ :: l1, _ :: l2 -> pop (n - 1) l1 l2
+        | _ -> assert false
+    in
+    pop n l1 l2
+
+  type index = int
+  let index = function
+    | _, [] -> assert false
+    | _, (n :: _) -> n
+
+  let compare (n1 : int) n2 = compare n1 n2
+end
+
+module ParserTrie = Ztrie.Make (Branch) (struct
+    type t = HashSet.t
+    let empty = HashSet.empty
+  end)
+
 module Learner : sig
   type t
   val fresh: unit -> t
   val learn:
     t -> 'a History.t -> ('a -> Merlin_parser.t) -> ('a -> Merlin_lexer.item) -> unit
 
-  val what_about: t -> hash -> HashSet.t
+  val what_about: t -> Parserhasher.hash -> HashSet.t
 end = struct
-  (* Map a Linewindow hash to a set of parser hashes *)
-  type t = (hash, HashSet.t) Hashtbl.t
+  type t = {
+    mutable trie: ParserTrie.t;
+  }
 
-  let fresh () = Hashtbl.create 117
+  let fresh () = {
+    trie = ParserTrie.empty;
+  }
 
-  let what_about t index =
-    try Hashtbl.find t index
-    with Not_found -> HashSet.empty
+  let what_about t branch =
+    let trie, branch' = ParserTrie.find t.trie branch in
+    t.trie <- trie;
+    if branch = branch' then
+      ParserTrie.get trie
+    else
+      HashSet.empty
 
-  let register t index hasher =
-    let hashset = what_about t index in
-    let value = Parserhasher.get hasher in
+  let register t index folder =
+    let branch = Parserhasher.get folder in
+    let trie = ParserTrie.seek t.trie branch in
+    let hashes = ParserTrie.get trie in
+    let trie = ParserTrie.set trie (HashSet.add index hashes) in
     Logger.infojf section ~title:"Learner.register"
-      (fun (value,index) -> `Assoc [
-           "parser", `String (sprintf "%016LX" value);
+      (fun (_branch,index) -> `Assoc [
+           "parser", `String "FIXME";
            "lexer", `String (sprintf "%016LX" index);
          ])
-      (value,index);
-    Hashtbl.replace t index (HashSet.add value hashset)
+      (branch,index);
+    t.trie <- trie
 
   let all_lines get_item tokens =
     let rec flush window acc =
@@ -278,7 +306,7 @@ end = struct
 
   let rec find_parser get_parser get_item item = function
     | x0 :: (x1 :: _ as tail) when get_item x1 == item ->
-      get_parser x0, tail
+      Merlin_parser.stack (get_parser x0), tail
     | _ :: tail -> find_parser get_parser get_item item tail
     | [] -> assert false
 
@@ -287,7 +315,7 @@ end = struct
     | (_, []) :: _ -> assert false
     | (hash, item :: _) :: lines ->
       let parser, tail = find_parser get_parser get_item item tail in
-      let hasher = Parserhasher.hash parser hasher in
+      let hasher = Parserhasher.update parser hasher in
       register t hash hasher;
       learn t get_parser get_item hasher tail lines
 
@@ -296,3 +324,4 @@ end = struct
     let lines = List.drop_n 1 (all_lines get_item tail) in
     learn t get_parser get_item Parserhasher.empty tail lines
 end
+

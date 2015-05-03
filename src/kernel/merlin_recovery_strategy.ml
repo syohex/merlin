@@ -215,5 +215,5 @@ let observable_state lr0 =
   let itemset = Query.itemset lr0 in
   not (List.for_all ~f:is_final itemset)
 
-let observable_state = Array.memoize Query.lr0_states ~f:observable_state
-let observable_state lr1 = observable_state (Query.lr0_state lr1)
+let observable_lr0_state = Array.memoize Query.lr0_states ~f:observable_state
+let observable_state lr1 = observable_lr0_state (Query.lr0_state lr1)

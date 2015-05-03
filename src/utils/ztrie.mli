@@ -19,15 +19,21 @@ module type VALUE = sig
   val empty: t
 end
 
-module Make (Branch : BRANCH) (V : VALUE) :
-sig
+module type S = sig
+  type branch
+  type value
+
   type t
   val empty: t
 
-  val seek: t -> Branch.t -> t
-  val get: t -> V.t
-  val set: t -> V.t -> t
+  val seek: t -> branch -> t
+  val get: t -> value
+  val set: t -> value -> t
 
-  val find: t -> Branch.t -> t * Branch.t
-  val position: t -> Branch.t
+  val find: t -> branch -> t * branch
+  val position: t -> branch
 end
+
+module Make (Branch : BRANCH) (V : VALUE) :
+  S with type branch := Branch.t
+     and type value := V.t

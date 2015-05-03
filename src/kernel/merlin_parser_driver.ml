@@ -81,18 +81,18 @@ let drop_comments_after pos comments =
     Lexing.compare_pos loc.Location.loc_end pos <= 0
   )
 
-let filter_recovery lexhash hashes (Zipper.Zipper (head, _, tail)) =
+let filter_recovery lexhash learner (Zipper.Zipper (head, _, tail)) =
   let open Merlin_student in
   let parsers = List.rev_append head tail in
   let hasher = ref Parserhasher.empty in
   let check (_,{Location. txt = parser}) =
-    hasher := Parserhasher.hash parser !hasher;
+    hasher := Parserhasher.update (Merlin_parser.stack parser) !hasher;
     let hash = Parserhasher.get !hasher in
     Logger.infojf learner_section ~title:"filter_recovery_hash"
-      (fun (lexhash, hash) -> `String
-          (sprintf "lexer(%016LX) parser(%016LX) -> ?\n%!" lexhash hash))
+      (fun (lexhash, _hash) -> `String
+          (sprintf "lexer(%016LX) parser(FIXME) -> ?\n%!" lexhash))
       (lexhash,hash);
-    let result = HashSet.mem hash hashes in
+    let result = HashSet.mem lexhash (Learner.what_about learner hash) in
     Logger.infoj learner_section ~title:"filter_recovery_found"
       (`Bool result);
     not result
@@ -129,19 +129,8 @@ let rec step warnings t token =
       match line with
       | None -> {t with state = Learning (endp, tokens, window)}
       | Some (hash, tokens_in_line) ->
-        let hashes = Merlin_student.Learner.what_about wisdom hash in
-        Logger.infojf learner_section ~title:"learn_from" (fun (hashes,hash) ->
-            `Assoc [
-              "candidate_count", `Int (Merlin_student.HashSet.cardinal hashes);
-              "lexer", `String (sprintf "%016LX" hash);
-              "candidates", `List
-                (Merlin_student.HashSet.fold (fun hash lst ->
-                     `String (sprintf "%016LX" hash) :: lst)
-                    hashes [])
-            ])
-          (hashes,hash);
         let recovery = Merlin_recovery.from_parser ~endp t.parser in
-        let recovery' = filter_recovery hash hashes recovery in
+        let recovery' = filter_recovery hash wisdom recovery in
         let tokens = List.rev tokens in
         let tokens = List.drop_while
             ~f:(fun item -> endp.Lexing.pos_lnum =
