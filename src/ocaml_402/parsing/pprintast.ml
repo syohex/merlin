@@ -609,7 +609,7 @@ class printer  ()= object(self:'self)
         pp f "@[<hov2>assert@ %a@]" self#simple_expr e
     | Pexp_lazy (e) ->
         pp f "@[<hov2>lazy@ %a@]" self#simple_expr e
-    (* Pexp_poly: impossible but we should print it anyway, rather than assert false *) 
+    (* Pexp_poly: impossible but we should print it anyway, rather than assert false *)
     | Pexp_poly (e, None) ->
         pp f "@[<hov2>!poly!@ %a@]" self#simple_expr e
     | Pexp_poly (e, Some ct) ->
@@ -1048,6 +1048,7 @@ class printer  ()= object(self:'self)
     | PPat (x, Some e) ->
       pp f "?"; self#pattern f x;
       pp f " when "; self#expression f e
+    | PCustom _ -> pp f "<custom>"
 
   (* transform [f = fun g h -> ..] to [f g h = ... ] could be improved *)
   method binding f {pvb_pat=p; pvb_expr=x; _} =
