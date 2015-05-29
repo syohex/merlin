@@ -328,10 +328,11 @@ An ocaml atom is any string containing [a-z_0-9A-Z`.]."
 (defun merlin--highlight (bounds face)
   "Create an overlay on BOUNDS (of the form (START . END)) and give it FACE."
   (remove-overlays nil nil 'merlin-kind 'highlight)
-  (lexical-let ((overlay (make-overlay (car bounds) (cdr bounds))))
-    (overlay-put overlay 'face face)
-    (overlay-put overlay 'merlin-kind 'highlight)
-    (unwind-protect (sit-for 60) (delete-overlay overlay))))
+  (when merlin-highlight-overlay (delete-overlay merlin-highlight-overlay))
+  (setq merlin-highlight-overlay (make-overlay (car bounds) (cdr bounds)))
+  (overlay-put merlin-highlight-overlay 'face face)
+  (overlay-put merlin-highlight-overlay 'merlin-kind 'highlight)
+  (unwind-protect (sit-for 60) (delete-overlay merlin-highlight-overlay)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PROCESS MANAGEMENT ;;
@@ -879,9 +880,13 @@ may be nil, in that case the current cursor of merlin is used."
     (setq point (previous-single-char-property-change point prop nil limit)))
   point)
 
-;; group is dynamically scoped
-(defun merlin--error-group-pred (err)
-  (eq (overlay-get err 'merlin-error-group) group))
+;; point and group are dynamically scoped
+(defun merlin--error-group-pred (ovl)
+  (and (eq (overlay-get ovl 'merlin-error-group) group)
+       (or (not (eq (overlay-get ovl 'merlin-error-group)
+                    (overlay-get ovl 'merlin-pending-error)))
+           (eq (overlay-start ovl) point)
+           (eq (overlay-end ovl) point))))
 
 (defun merlin--error-group-next (point group &optional limit)
   (let ((point (merlin--overlay-next-property-set point 'merlin-pending-error limit)))
@@ -965,15 +970,15 @@ may be nil, in that case the current cursor of merlin is used."
 (defun merlin-error-next-in-group ()
   "Jump to next error in same group, if any, next error otherwise."
   (interactive)
-  (let ((err (merlin--error-at-position (point)
-                                            (merlin--errors-at-position (point)))))
+  (let ((err (merlin--error-at-position
+               (point) (merlin--errors-at-position (point)))))
     (merlin-error-next (when err (overlay-get err 'merlin-error-group)))))
 
 (defun merlin-error-prev-in-group ()
   "Jump to previous error in same group, if any, previous error otherwise."
   (interactive)
-  (let ((err (merlin--error-at-position (point)
-                                        (merlin--errors-at-position (point)))))
+  (let ((err (merlin--error-at-position
+               (point) (merlin--errors-at-position (point)))))
     (merlin-error-prev (when err (overlay-get err 'merlin-error-group)))))
 
 (defun merlin--error-warning-p (msg)
