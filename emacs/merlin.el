@@ -746,10 +746,15 @@ the error message otherwise print a generic error message."
    "Return content of buffer between two points or empty string if points are not valid"
    (if (< start end) (buffer-substring-no-properties start end) ""))
 
+(defvar-local merlin--last-edit nil
+   "Coordinates (start . end) of last edition or nil, to prevent error messages from flickering when cursor is around edition.")
+
 (defun merlin--sync-edit (start end length)
   "Retract merlin--dirty-point, used when the buffer is edited."
-  (when (and merlin-mode (< (1- start) merlin--dirty-point))
-    (setq merlin--dirty-point (1- start))))
+  (when merlin-mode
+    (setq merlin--last-edit (cons start end))
+    (when (< (1- start) merlin--dirty-point)
+      (setq merlin--dirty-point (1- start)))))
 
 (defun merlin/sync ()
   "Synchronize buffer with merlin"
@@ -807,9 +812,12 @@ the error message otherwise print a generic error message."
   (when (and merlin-mode (not (current-message)))
     (let* ((errors (overlays-in (line-beginning-position) (line-end-position)))
            (err nil))
-      (setq errors (remove nil (mapcar 'merlin--overlay-pending-error errors)))
-      (setq err (merlin--error-at-position (point) errors))
-      (when err (message "%s" (cdr (assoc 'message err)))))))
+      (when (or (not merlin--last-edit)
+                (not (or (= (point) (car merlin--last-edit))
+                         (= (point) (cdr merlin--last-edit)))))
+        (setq errors (remove nil (mapcar 'merlin--overlay-pending-error errors)))
+        (setq err (merlin--error-at-position (point) errors))
+        (when err (message "%s" (cdr (assoc 'message err))))))))
 
 (defun merlin--overlay-next-property-set (point prop &optional limit)
   "Find next point where PROP is set (like next-single-char-property-change but ensure that prop is not-nil)."
@@ -859,6 +867,7 @@ the error message otherwise print a generic error message."
   (when (and merlin-mode merlin-error-after-save) (merlin-error-check)))
 
 (defadvice basic-save-buffer (after merlin--after-save activate)
+  "The save hook is called only if buffer was modified, but user might want fresh errors anyway"
   (merlin--after-save))
 
 (defun merlin-error-prev ()
