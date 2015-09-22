@@ -528,9 +528,7 @@ let mkoption d =
 
 let reloc_pat startpos endpos x= { x with ppat_loc = rloc startpos endpos };;
 let reloc_exp startpos endpos x= { x with pexp_loc = rloc startpos endpos };;
-let reloc_exp_fake startpos endpos x =
-  { x with pexp_loc =
-      Parsing_aux.pack_fake_location x.pexp_loc ~fake:(rloc startpos endpos) }
+let reloc_exp_fake _startpos _endpos x = x
 
 let mkoperator startpos endpos name =
   let loc = rloc startpos endpos in
