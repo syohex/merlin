@@ -69,6 +69,9 @@ let mkoption d =
 
 let reloc_pat startpos endpos x = { x with ppat_loc = symbol_rloc startpos endpos  };;
 let reloc_exp startpos endpos x = { x with pexp_loc = symbol_rloc startpos endpos  };;
+let reloc_exp_fake startpos endpos x =
+  { x with pexp_loc =
+      Location.pack_fake_location x.pexp_loc ~fake:(symbol_rloc startpos endpos) }
 
 let mkoperator startpos endpos name =
   let loc = symbol_rloc startpos endpos in
@@ -1047,11 +1050,14 @@ expr:
   | simple_expr simple_labeled_expr_list
       { mkexp $startpos $endpos (Pexp_apply($1, List.rev $2)) }
   | LET @{`Item "let"} rec_flag let_bindings IN  @{`Shift 2} seq_expr
-      { mkexp $startpos $endpos (Pexp_let($2, List.rev $3, $5)) }
+      { let expr = reloc_exp_fake $endpos($4) $endpos $5 in
+        mkexp $startpos $endpos (Pexp_let($2, List.rev $3, expr)) }
   | LET MODULE @{`Item "let module"} UIDENT module_binding IN @{`Shift 2} seq_expr
-      { mkexp $startpos $endpos (Pexp_letmodule(mkrhs $startpos($3) $endpos($3) $3, $4, $6)) }
+      { let expr = reloc_exp_fake $endpos($5) $endpos $6 in
+        mkexp $startpos $endpos (Pexp_letmodule(mkrhs $startpos($3) $endpos($3) $3, $4, expr)) }
   | LET OPEN @{`Item "let open"} override_flag mod_longident IN @{`Shift 2} seq_expr
-      { mkexp $startpos $endpos (Pexp_open($3, mkrhs $startpos($4) $endpos($4) $4, $6)) }
+      { let expr = reloc_exp_fake $endpos($5) $endpos $6 in
+        mkexp $startpos $endpos (Pexp_open($3, mkrhs $startpos($4) $endpos($4) $4, expr)) }
   | FUNCTION @{`Item "function"} opt_bar match_cases
       { mkexp $startpos $endpos (Pexp_function("", None, List.rev $3)) }
   | FUN @{`Item "function"}  labeled_simple_pattern fun_def
@@ -1291,9 +1297,10 @@ fun_def:
       { mkexp $startpos $endpos (Pexp_newtype($3, $5)) }
 ;
 match_action:
-  | MINUSGREATER @{`Item "match action"} seq_expr { $2 }
+  | MINUSGREATER @{`Item "match action"} seq_expr                       { reloc_exp_fake $endpos($1) $endpos $2 }
   | WHEN @{`Item "when guard"} seq_expr MINUSGREATER @{`Item "match action"} expr = seq_expr
-    { ghexp $startpos $endpos (Pexp_when($2, expr)) }
+    { let expr = reloc_exp_fake $endpos($3) $endpos expr in
+      ghexp $startpos $endpos (Pexp_when($2, expr)) }
 ;
 expr_comma_list:
     expr_comma_list COMMA expr                  { $3 :: $1 }
@@ -1908,7 +1915,8 @@ additive:
 
 expr:
   | LET_LWT @{`Item "lwt"} rec_flag let_bindings IN @{`Shift 2} seq_expr
-      { let expr = Pexp_let($2, List.rev_map (Fake.pat_app Fake.Lwt.un_lwt) $3, $5) in
+      { let expr = reloc_exp_fake $endpos($4) $endpos $5 in
+        let expr = Pexp_let($2, List.rev_map (Fake.pat_app Fake.Lwt.un_lwt) $3, expr) in
         Fake.app Fake.Lwt.in_lwt (mkexp $startpos $endpos expr) }
   | MATCH_LWT @{`Item "match_lwt"} seq_expr WITH opt_bar match_cases
       { let expr = mkexp $startpos $endpos

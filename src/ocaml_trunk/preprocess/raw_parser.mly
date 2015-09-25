@@ -32,6 +32,9 @@ let mkoption d =
 
 let reloc_pat startpos endpos x= { x with ppat_loc = rloc startpos endpos };;
 let reloc_exp startpos endpos x= { x with pexp_loc = rloc startpos endpos };;
+let reloc_exp_fake startpos endpos x =
+  let str = mkloc "merlin.loc" (rloc startpos endpos) in
+  { x with pexp_attributes = (str , PStr []) :: x.pexp_attributes }
 
 let mkoperator startpos endpos name =
   let loc = rloc startpos endpos in
@@ -1164,13 +1167,16 @@ expr:
 | simple_expr simple_labeled_expr_list
     { mkexp $startpos $endpos (Pexp_apply($1, List.rev $2)) }
 | LET @{`Item "let"} ext_attributes rec_flag let_bindings_no_attrs _in = IN @{`Shift 2} expr = seq_expr
-    { mkexp_attrs $startpos $endpos (Pexp_let($3, List.rev $4, expr)) $2 }
+    { let expr = reloc_exp_fake $endpos(_in) $endpos expr in
+      mkexp_attrs $startpos $endpos (Pexp_let($3, List.rev $4, expr)) $2 }
 | LET MODULE @{`Item "let module"}
   ext_attributes UIDENT module_binding_body _in = IN @{`Shift 2} expr = seq_expr
-    { mkexp_attrs $startpos $endpos (Pexp_letmodule(mkrhs $startpos($4) $endpos($4) $4, $5, expr)) $3 }
+    { let expr = reloc_exp_fake $endpos(_in) $endpos expr in
+      mkexp_attrs $startpos $endpos (Pexp_letmodule(mkrhs $startpos($4) $endpos($4) $4, $5, expr)) $3 }
 | LET OPEN @{`Item "let open"}
   expr_open _in = IN @{`Shift 2} expr = seq_expr
-    { let (flag,id,ext) = $3 in
+    { let expr = reloc_exp_fake $endpos(_in) $endpos expr in
+      let (flag,id,ext) = $3 in
       mkexp_attrs $startpos $endpos (Pexp_open(flag, id, expr)) ext }
 | FUNCTION @{`Item "function"}
   ext_attributes opt_bar match_cases
@@ -1450,11 +1456,11 @@ match_cases:
 match_case:
 | @{`Item "pattern"} pattern
   MINUSGREATER @{`Item "match action"} expr = seq_expr
-    { Exp.case $1 expr }
+    { Exp.case $1 (reloc_exp_fake $endpos($2) $endpos expr) }
 | @{`Item "pattern"} pattern
   WHEN @{`Item "when guard"} seq_expr
   MINUSGREATER @{`Item "match action"} expr = seq_expr
-    { Exp.case $1 ~guard:$3 expr }
+    { Exp.case $1 ~guard:$3 (reloc_exp_fake $endpos($4) $endpos expr) }
 
 fun_def:
 | MINUSGREATER seq_expr
@@ -2627,7 +2633,8 @@ with_extensions:
 expr:
 | LET_LWT @{`Item "lwt"}
   ext_attributes rec_flag let_bindings IN @{`Shift 2} seq_expr
-    { let expr = Pexp_let($3, List.rev_map (fake_vb_app Fake.Lwt.un_lwt) $4, $6) in
+    { let expr = reloc_exp_fake $endpos($5) $endpos $6 in
+      let expr = Pexp_let($3, List.rev_map (fake_vb_app Fake.Lwt.un_lwt) $4, expr) in
       Fake.app Fake.Lwt.in_lwt (mkexp_attrs $startpos $endpos expr $2) }
 | MATCH_LWT @{`Item "match_lwt"}
   ext_attributes seq_expr WITH opt_bar match_cases

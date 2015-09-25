@@ -528,7 +528,9 @@ let mkoption d =
 
 let reloc_pat startpos endpos x= { x with ppat_loc = rloc startpos endpos };;
 let reloc_exp startpos endpos x= { x with pexp_loc = rloc startpos endpos };;
-let reloc_exp_fake _startpos _endpos x = x
+let reloc_exp_fake startpos endpos x =
+  let str = mkloc "merlin.loc" (rloc startpos endpos) in
+  { x with pexp_attributes = (str , PStr []) :: x.pexp_attributes }
 
 let mkoperator startpos endpos name =
   let loc = rloc startpos endpos in
