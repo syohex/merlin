@@ -36,7 +36,7 @@ to switch between buffers.
 
 A simple session (user-commands prefixed by >, merlin responses by <):
 
-```json
+```javascript
 > ["tell","source","let f x = x;;"]
 < ["return",{"cursor":{"line":1,"col":13},"marker":false}]
 > ["type","expression","f"]
@@ -86,7 +86,7 @@ The first line has number 1.
 
 All telling commands return a cursor state.
 
-```json
+```javascript
 ["tell","start"]
 ["tell","start","at",{"line":int, "col":int}]
 ```
@@ -95,7 +95,7 @@ Prepare merlin for receiving text. If a position is specified, the cursor will b
 Merlin will return the actual position where text will be inserted as a cursor state object `{"cursor":position, "marker":bool}`, so the editor should be prepared to send more text.
 Don't bother about the `"marker"` field yet.
 
-```json
+```javascript
 ["tell","source",string]
 ["tell","file",string]
 ```
@@ -107,7 +107,7 @@ Like calling `["tell","source",...]` with the contents of the file as argument.
 
 Be careful that EOF is not set, see the next commands.
 
-```json
+```javascript
 ["tell","eof"]
 ["tell","source-eof",string]
 ["tell","file-eof",string]
@@ -117,13 +117,13 @@ Signal EOF at the current cursor position, or after appending some text.
 Merlin behaves slightly differently when EOF is not set, for instance by not reporting errors about unterminated statements.
 You shouln't usually bother about that: unless you know you are working with unfinished contents (e.g REPL input), always set EOF at the end of the buffer.
 
-```json
+```javascript
 ["tell","marker"]
 ```
 
 Set the marker at the current position. Useful only in advanced use-cases, see the marker section for more information.
 
-```json
+```javascript
 ["drop"]
 ```
 
@@ -137,26 +137,26 @@ Moving the cursor is useful to control the prefix of the buffer that must be con
 Practical for debugging but doesn't matter for basic usecases.
 
 
-```json
+```javascript
 ["seek","position"]
 ```
 
 Returns the current position of the cursor without doing anything else.
 
-```json
+```javascript
 ["seek","before",position]
 ["seek","exact",position]
 ```
 
 Move the cursor to the requested position. If this position happens to be in the middle of a token, `"exact"` will set the cursor at this token while `"before"` will move to the preceding one.
 
-```json
+```javascript
 ["seek","end"]
 ```
 
 Move the cursor to the last position known to merlin.
 
-```json
+```javascript
 ["seek","marker"]
 ```
 
@@ -166,7 +166,7 @@ Move the cursor to the last state where the marker was on stack. For advanced us
 
 #### Flags
 
-```json
+```javascript
 ["flags","add",["-rectypes", "-safe-string", ...]]
 ["flags","clear"]
 ```
@@ -176,7 +176,7 @@ Pass the same flags as you would pass to the OCaml compiler. Run `ocamlmerlin -h
 
 Returns `{"result":true}` if everything went well or `{"failures":string list, "result":true}` in case of error.
 
-```json
+```javascript
 ["flags","get"]
 ```
 
@@ -184,14 +184,14 @@ Returns a `string list list` (eg `[["-rectypes"],["-safe-string"]]`) resulting f
 
 #### Findlib packages
 
-```json
+```javascript
 ["find","use",["lwt","yojson",...]]
 ```
 
 Load findlib packages in current buffer.
 Returns `{"result":true}` if everything went well or `{"failures":string list, "result":true}` in case of error.
 
-```json
+```javascript
 ["find","list"]
 ```
 
@@ -199,14 +199,14 @@ Returns a `string list` of all known packages.
 
 #### Syntax extensions
 
-```json
+```javascript
 ["extension","enable",["lwt","js",...]]
 ["extension","disable",["lwt","js",...]]
 ```
 
 Enable or disable syntax extensions in current buffer.
 
-```json
+```javascript
 ["extension","list"]
 ["extension","list","enabled"]
 ["extension","list","disabled"]
@@ -216,7 +216,7 @@ List all known / currently enabled / currently disabled extensions as a `string 
 
 #### Paths
 
-```json
+```javascript
 ["path","add","source",[path1, path2, ...]]
 ["path","add","build",[path1, path2, ...]]
 ["path","remove","source",[path1, path2, ...]]
@@ -226,14 +226,14 @@ List all known / currently enabled / currently disabled extensions as a `string 
 Merlin maintains different list of paths to process buffer and queries.
 `"source"` is where `.ml` and `.mli` files are searched for, `"build"` is for `.cmi` and `.cmt`.
 
-```json
+```javascript
 ["path","list","source"]
 ["path","list","build"]
 ```
 
 Get current value of path variables as a `string list`.
 
-```json
+```javascript
 ["path","reset"]
 ```
 
@@ -243,61 +243,85 @@ Reset path variables to default value (by default just the standard library and 
 
 #### Type-checking
 
-```json
+```javascript
 ["type","expression",string]
 ["type","expression",string,"at",{"line":int,"col":int}]
 ```
 
-```json
+```javascript
 ["type","enclosing","at",{"line":int,"col":int}]
 ["type","enclosing",{"expr":string,"offset":int},{"line":int,"col":int}]
 ```
 
-```json
+```javascript
 ["type","case","analysis","from",position,"to",position]
 ```
 
 #### Completion
 
-```json
+```javascript
 ["complete","prefix",string,"at",position]
 ["complete","prefix",string,"at",position,"with","doc"]
 ["expand","prefix",string,"at",position]
 ```
 
-```json
+These functions complete an identifier that the user started to type.
+They all return a list of possible completion. The "with doc" variant also try to lookup OCamldoc, which is slightly more time consuming.
+
+The expand function also try to complete partial or incorrect prefixes. For instance, `L.ma` can get expanded to `List.map`. This function is a useful fallback if normal completion gave no results.
+Be careful that it always return fully qualified paths, whereas normal completion only completes an identifier (last part of a module path). 
+
+The result has the form:
+```javascript
+{
+  context: (null | ["application",{"argument_type": string, "labels": [{"name":string,"type":string}]}]),
+  entries: [{"name":string,"kind":string,"desc":string,"info":string}]
+}
+```
+
+Context describe where completion is occurring. Only application is distinguished now: that's when one is completing the arguments to a function call. In this case, one gets the type expected at the cursor as well as the other labels.
+
+Entries is the list of possible completion. Each entry is made of:
+- a name, the text that should be put in the buffer if selected
+- a kind, one of `"value"`, `"variant"`, `"constructor"`, `"label"`, `"module"`, `"signature"`, `"type"`, `"method"`, `"#"` (for method calls), `"exn"`, `"class"`
+- a description, most of the time a type or a definition line, to be put next to the name in completion box
+- optional informations which might not fit in the completion box, like signatures for modules or documentation string.
+
+```javascript
 ["document",string,"at",position]
 ["document",null,"at",position]
 ```
 
+Returns OCamldoc documentation as a string, either for the given qualified identifier or the one under cursor.
+
 #### Navigation
 
-```json
+```javascript
 ["occurrences","ident","at",position]
 ```
 
-```json
+```javascript
 ["locate",string,"ml","at",position]
 ["locate",null,"ml","at",position]
 ["locate",string,"mli","at",position]
 ["locate",null,"mli","at",position]
 ```
 
-```json
+```javascript
 ["which","path",string list]
 ```
 
 Returns the full path of the first file with a name listed in the argument.
 E.g. `["which","path",["list.ml","list.mli"]]` should return the path of the standard _List_ implementation, unless another _List_ is defined in a user directory.
 
-```json
+```javascript
 ["which","with_ext",string list]
 ```
 
 Returns a list of module names for which a file exists in the path with an extension listed in the argument.
 
 `["which","with_ext",[".ml",".mli"]]` lists all top modules with either a signature or an implementation in current project.
-You can then use `["which","path",[module + ".ml", module + ".mli"]]` to open of them, favoring implementations over interfaces.
+You can then use `["which","path",[module + ".ml", module + ".mli"]]` to open of them (in this case favoring implementations over interfaces).
 
 
 ```
@@ -307,14 +331,14 @@ You can then use `["which","path",[module + ".ml", module + ".mli"]]` to open of
 
 #### Error management
 
-```json
+```javascript
 ["errors"]
 ```
 
 Returns a list of errors in current buffer.
 TODO: document error format.
 
-```json
+```javascript
 ["project","get"]
 ```
 
@@ -328,7 +352,7 @@ Merlin keep tracks of multiple buffer. All commands apply to the active buffer.
 It returns a `cursor state` object describind the state of the checked out buffer (see `"tell"` command).
 
 
-```json
+```javascript
 ["checkout", "ml"]
 ["checkout", "mli"]
 ```
@@ -336,7 +360,7 @@ It returns a `cursor state` object describind the state of the checked out buffe
 Switch to "default" buffer for "ml", "mli".
 It will be in the state you left it last time it was used, unless merlin decided to garbage collect because of memory pressure (any buffer left in background is either untouched or resetted because of collection).
 
-```json
+```javascript
 ["checkout", "auto", string]
 ["checkout", "ml"  , string]
 ["checkout", "mli" , string]
@@ -345,7 +369,7 @@ It will be in the state you left it last time it was used, unless merlin decided
 Checkout buffer at a given path, interpreting it as an ml, an mli, or infer that from path extension (defaulting to ml).
 File at path is not loaded, path is only used as a key to refer to the buffer and look for _.merlin_ files.
 
-```json
+```javascript
 ["checkout", "dot_merlin", string list, "auto", string]
 ["checkout", "dot_merlin", string list, "ml"  , string]
 ["checkout", "dot_merlin", string list, "mli" , string]
@@ -358,7 +382,7 @@ Same as `["checkout", _, string]`, but rather than inferring the _.merlin_ from 
 An important variant of this scheme are the _contextual commands_.
 All merlin commands except `"checkout"` can be wrapped in a dictionary looking like:
 
-```json
+```javascript
 {
   "context": context,
   "query": command
@@ -369,7 +393,7 @@ Where `command` is a merlin command and context would be the list of arguments p
 
 This has the same effect as executing:
 
-```json
+```javascript
 ["checkout", context...]
 [command...]
 ```
@@ -378,13 +402,13 @@ This is useful to prevent race conditions resulting from concurrent manipulation
 
 ### Misc
 
-```json
+```javascript
 ["version"]
 ```
 
 Returns a string describing merlin version.
 
-```json
+```javascript
 ["boundary","next","at",position]
 ["boundary","prev","at",position]
 ["boundary","current","at",position]
@@ -399,7 +423,7 @@ Originally intended to implement features such as moving by phrase, alternative 
 Dump command allow to observe internal structures of Merlin.
 Result is an arbitratry json object, targeted toward human readers.
 
-```json
+```javascript
 ["dump","env"]
 ["dump","env","at",position]
 ["dump","full_env"]
@@ -409,13 +433,13 @@ Result is an arbitratry json object, targeted toward human readers.
 Dump content of environment.
 `"env"` is limited to local definition, `"full_env"` also includes `Pervasives` and default environment.
 
-```json
+```javascript
 ["dump","sig"]
 ```
 
 Dump definitions in environment as an ML signature.
 
-```json
+```javascript
 ["dump","tokens"]
 ["dump","parser"]
 ["dump","recover"]
@@ -423,7 +447,7 @@ Dump definitions in environment as an ML signature.
 
 Dump output of the lexer, state of the parser and possible recoveries.
 
-```json
+```javascript
 ["dump","browse"]
 ["dump","typer","input"]
 ["dump","typer","output"]
@@ -434,7 +458,7 @@ Dump state of typechecker.
 `"output"` is the annotated AST produced by the typer.
 `"browse"` is a json-based tree built out of the `"output"`.
 
-```json
+```javascript
 ["dump","flags"]
 ["dump","warnings"]
 ```
@@ -445,9 +469,10 @@ List of the flags and warnings set for current buffers.
 
 Marker management.
 Logging infrastructure.
+Explain responses verbosity.
 Cleanup list of type below.
 
---
+# OLD
 
 # Basic types
 
