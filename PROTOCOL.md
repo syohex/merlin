@@ -241,32 +241,85 @@ Reset path variables to default value (by default just the standard library and 
 
 ### Queries
 
+#### Type-checking
+
 ```json
 ["type","expression",string]
 ["type","expression",string,"at",{"line":int,"col":int}]
+```
+
+```json
 ["type","enclosing","at",{"line":int,"col":int}]
 ["type","enclosing",{"expr":string,"offset":int},{"line":int,"col":int}]
+```
+
+```json
 ["type","case","analysis","from",position,"to",position]
-["enclosing",position]
+```
+
+#### Completion
+
+```json
 ["complete","prefix",string,"at",position]
 ["complete","prefix",string,"at",position,"with","doc"]
 ["expand","prefix",string,"at",position]
+```
+
+```json
 ["document",string,"at",position]
 ["document",null,"at",position]
+```
+
+#### Navigation
+
+```json
 ["occurrences","ident","at",position]
+```
+
+```json
 ["locate",string,"ml","at",position]
 ["locate",null,"ml","at",position]
 ["locate",string,"mli","at",position]
 ["locate",null,"mli","at",position]
-["outline"]
-["errors"]
-["which","path",string]
-["which","path",string list]
-["which","with_ext",string]
-["which","with_ext",string list]
-["project","get"]
-["version"]
 ```
+
+```json
+["which","path",string list]
+```
+
+Returns the full path of the first file with a name listed in the argument.
+E.g. `["which","path",["list.ml","list.mli"]]` should return the path of the standard _List_ implementation, unless another _List_ is defined in a user directory.
+
+```json
+["which","with_ext",string list]
+```
+
+Returns a list of module names for which a file exists in the path with an extension listed in the argument.
+
+`["which","with_ext",[".ml",".mli"]]` lists all top modules with either a signature or an implementation in current project.
+You can then use `["which","path",[module + ".ml", module + ".mli"]]` to open of them, favoring implementations over interfaces.
+
+
+```
+["enclosing",position]
+["outline"]
+```
+
+#### Error management
+
+```json
+["errors"]
+```
+
+Returns a list of errors in current buffer.
+TODO: document error format.
+
+```json
+["project","get"]
+```
+
+Returns an object `{"result":string list,"failures":string list}` listing all _.merlin_ files loaded for current buffer and a list of failures that might have happened during loading (missing package for instance, ill-formed .merlin, etc).
+The `"failures"` field can be omitted if there has been no error.
 
 ### Context
 
@@ -323,8 +376,13 @@ This has the same effect as executing:
 
 This is useful to prevent race conditions resulting from concurrent manipulations of different buffers in the editor, by making sure each command is interpreted in the appropriate context.
 
-
 ### Misc
+
+```json
+["version"]
+```
+
+Returns a string describing merlin version.
 
 ```json
 ["boundary","next","at",position]
@@ -333,24 +391,61 @@ This is useful to prevent race conditions resulting from concurrent manipulation
 ["boundary","at",position]
 ```
 
+DEPRECATED. The boundary command returns the location of the construction under or near the cursor.
+Originally intended to implement features such as moving by phrase, alternative are being explored.
+
 #### Debugging Merlin
+
+Dump command allow to observe internal structures of Merlin.
+Result is an arbitratry json object, targeted toward human readers.
 
 ```json
 ["dump","env"]
 ["dump","env","at",position]
 ["dump","full_env"]
 ["dump","full_env","at",position]
+```
+
+Dump content of environment.
+`"env"` is limited to local definition, `"full_env"` also includes `Pervasives` and default environment.
+
+```json
 ["dump","sig"]
+```
+
+Dump definitions in environment as an ML signature.
+
+```json
+["dump","tokens"]
 ["dump","parser"]
 ["dump","recover"]
-["dump","exn"]
+```
+
+Dump output of the lexer, state of the parser and possible recoveries.
+
+```json
 ["dump","browse"]
 ["dump","typer","input"]
 ["dump","typer","output"]
-["dump","tokens"]
+```
+
+Dump state of typechecker.
+`"input"` is the AST has seen by the typer.
+`"output"` is the annotated AST produced by the typer.
+`"browse"` is a json-based tree built out of the `"output"`.
+
+```json
 ["dump","flags"]
 ["dump","warnings"]
 ```
+
+List of the flags and warnings set for current buffers.
+
+# TODO
+
+Marker management.
+Logging infrastructure.
+Cleanup list of type below.
 
 --
 
@@ -381,81 +476,6 @@ Strings addressing file system objects:
     path = string, points any file or directory
     directory = string, expected to name a directory
     filename = string, expected to name a regular file
-
-# Buffer management
-
-## tell
-
-Use ['tell','struct','...ocaml impl...'] to send source code from editor to
-merlin.  The command answers the boolean 'true' if parsing ended, 'false' if it
-needs more input.  In this case, the only allowed command is
-['tell','struct','next source content'].  To interrupt the parser, run
-['tell','struct',''] (meaning eof) or ['tell','struct',null].
-
-### ["tell","struct",string]
-
-Send a chunk of ml source code. Merlin will wait for the rest of the input.
-
-### ["tell","end",string]
-
-Same as above, but tell merlin that you want to stop as soon as possible.
-Merlin will stop waiting for input once the current definition is complete.
-
-### ["tell","struct",null]
-
-Notify merlin that EOF has been reached.
-
-### ["tell","end",null]
-
-Same as ["tell","struct",null]
-
-## seek
-
-All seek functions return the position of Merlin virtual cursor after
-their execution, as a position object.
-
-### ["seek","position"]
-
-Return the current position of the cursor.
-
-### ["seek","before",position]
-
-Move cursor just before the definition around specified position.
-
-### ["seek","exact",position]
-
-Move cursor to the position that has been given, or just after if this is in
-the middle of an ml definition.
-
-### ["seek","end"]
-
-Put cursor at the end of file.
-
-### ["seek","maximize\_scope"]
-
-Move cursor down until the current scope is escaped (usually when
-encountering an "end" of structure).
-
-## Buffers management, dependency reloading
-
-### ["reset"]
-
-Clear content of virtual buffer.
-
-### ["reset",path]
-
-Clear content of virtual buffer and set its name.
-This is used to report more informative error messages (the same the compiler
-would report for a file with the given path).
-
-### ["refresh"]
-
-Reload all dependencies and try to retype the current file.
-
-### ["refresh","quick"]
-
-Try to detect dependencies that have changed and reload them. If needed,
-retype current file.
 
 # Wizardry
 
