@@ -43,6 +43,7 @@ A simple session (user-commands prefixed by >, merlin responses by <):
 < ["return","'a -> 'a"]
 ```
 
+
 ## Responses
 
 Responses are always of the form `[kind,payload]` where `payload`
@@ -62,6 +63,7 @@ notified to fix the environment.
 
 `"exception"` when something unexpected happened.  Merlin should be
 fixed, please report the error.  `payload` is an arbitraty json value.
+
     
 ## Synchronization
 
@@ -82,6 +84,7 @@ Positions are represented as a pair of a line and a
 column, `{"line":1,"col":0}` in JSON.
 The first line has number 1.
 
+
 ### Tell
 
 All telling commands return a cursor state.
@@ -94,6 +97,7 @@ All telling commands return a cursor state.
 Prepare merlin for receiving text. If a position is specified, the cursor will be moved there.
 Merlin will return the actual position where text will be inserted as a cursor state object `{"cursor":position, "marker":bool}`, so the editor should be prepared to send more text.
 Don't bother about the `"marker"` field yet.
+
 
 ```javascript
 ["tell","source",string]
@@ -117,11 +121,13 @@ Signal EOF at the current cursor position, or after appending some text.
 Merlin behaves slightly differently when EOF is not set, for instance by not reporting errors about unterminated statements.
 You shouln't usually bother about that: unless you know you are working with unfinished contents (e.g REPL input), always set EOF at the end of the buffer.
 
+
 ```javascript
 ["tell","marker"]
 ```
 
 Set the marker at the current position. Useful only in advanced use-cases, see the marker section for more information.
+
 
 ```javascript
 ["drop"]
@@ -143,6 +149,7 @@ Practical for debugging but doesn't matter for basic usecases.
 
 Returns the current position of the cursor without doing anything else.
 
+
 ```javascript
 ["seek","before",position]
 ["seek","exact",position]
@@ -150,11 +157,13 @@ Returns the current position of the cursor without doing anything else.
 
 Move the cursor to the requested position. If this position happens to be in the middle of a token, `"exact"` will set the cursor at this token while `"before"` will move to the preceding one.
 
+
 ```javascript
 ["seek","end"]
 ```
 
 Move the cursor to the last position known to merlin.
+
 
 ```javascript
 ["seek","marker"]
@@ -176,6 +185,7 @@ Pass the same flags as you would pass to the OCaml compiler. Run `ocamlmerlin -h
 
 Returns `{"result":true}` if everything went well or `{"failures":string list, "result":true}` in case of error.
 
+
 ```javascript
 ["flags","get"]
 ```
@@ -191,6 +201,7 @@ Returns a `string list list` (eg `[["-rectypes"],["-safe-string"]]`) resulting f
 Load findlib packages in current buffer.
 Returns `{"result":true}` if everything went well or `{"failures":string list, "result":true}` in case of error.
 
+
 ```javascript
 ["find","list"]
 ```
@@ -205,6 +216,7 @@ Returns a `string list` of all known packages.
 ```
 
 Enable or disable syntax extensions in current buffer.
+
 
 ```javascript
 ["extension","list"]
@@ -226,12 +238,14 @@ List all known / currently enabled / currently disabled extensions as a `string 
 Merlin maintains different list of paths to process buffer and queries.
 `"source"` is where `.ml` and `.mli` files are searched for, `"build"` is for `.cmi` and `.cmt`.
 
+
 ```javascript
 ["path","list","source"]
 ["path","list","build"]
 ```
 
 Get current value of path variables as a `string list`.
+
 
 ```javascript
 ["path","reset"]
@@ -248,14 +262,37 @@ Reset path variables to default value (by default just the standard library and 
 ["type","expression",string,"at",{"line":int,"col":int}]
 ```
 
+Returns the type of the expression when typechecked in the environment at cursor or around the specified position.
+
+
 ```javascript
 ["type","enclosing","at",{"line":int,"col":int}]
 ["type","enclosing",{"expr":string,"offset":int},{"line":int,"col":int}]
 ```
 
+Returns a list of type information for all expressions at given position, sorted by increasing size.
+That is asking for type enlosing around `2` in `string_of_int 2` will return the types of `2 : int` and `string_of_int 2 : string`. 
+
+The `{"expr":string,"offset":int}` variant expects the string under cursor and the offset of the cursor in this string, to return more specific information. 
+
+The result is returned as a list of:
 ```javascript
-["type","case","analysis","from",position,"to",position]
+{
+  "start": position,
+  "end": position,
+  "type": string,
+  // is this expression not in tail position, in tail position, or even a tail call?
+  "tail": ("no" | "position" | "call")
+}
 ```
+
+
+```javascript
+["case","analysis","from",position,"to",position]
+```
+
+Try to destruct patterns in the specified range.
+It returns a value with the shape `[{"start": position, "end": position}, content]`. The editor is expected to replace content between `start` and `end` by `content`.
 
 #### Completion
 
@@ -287,6 +324,7 @@ Entries is the list of possible completion. Each entry is made of:
 - a description, most of the time a type or a definition line, to be put next to the name in completion box
 - optional informations which might not fit in the completion box, like signatures for modules or documentation string.
 
+
 ```javascript
 ["document",string,"at",position]
 ["document",null,"at",position]
@@ -300,6 +338,9 @@ Returns OCamldoc documentation as a string, either for the given qualified ident
 ["occurrences","ident","at",position]
 ```
 
+Returns a list of locations `{"start": position, "end": position}` of all occurrences in current buffer of the entity at the specified position.
+
+
 ```javascript
 ["locate",string,"ml","at",position]
 ["locate",null,"ml","at",position]
@@ -307,12 +348,20 @@ Returns OCamldoc documentation as a string, either for the given qualified ident
 ["locate",null,"mli","at",position]
 ```
 
+Finds the declaration of entity at the specified position, or referred to by specified string.
+Returns either:
+- if location failed, a `string` describing the reason to the user,
+- `{"pos": position}` if the location is in the current buffer,
+- `{"file": string, "pos": position}` if definition is located in a different file.
+
+
 ```javascript
 ["which","path",string list]
 ```
 
 Returns the full path of the first file with a name listed in the argument.
 E.g. `["which","path",["list.ml","list.mli"]]` should return the path of the standard _List_ implementation, unless another _List_ is defined in a user directory.
+
 
 ```javascript
 ["which","with_ext",string list]
@@ -324,10 +373,18 @@ Returns a list of module names for which a file exists in the path with an exten
 You can then use `["which","path",[module + ".ml", module + ".mli"]]` to open of them (in this case favoring implementations over interfaces).
 
 
-```
-["enclosing",position]
+```javascript
 ["outline"]
 ```
+
+Returns a tree of objects `{"start": position, "end": position, "name": string, "kind": string, "children": subnodes}` describing the content of the buffer.
+
+
+```javascript
+["enclosing",position]
+```
+
+Returns a list of locations `{"start": position, "end": position}` in increasing size of all entities surrounding the position. Like s-exps around position but following OCaml syntax.
 
 #### Error management
 
@@ -336,7 +393,23 @@ You can then use `["which","path",[module + ".ml", module + ".mli"]]` to open of
 ```
 
 Returns a list of errors in current buffer.
-TODO: document error format.
+The value is a list where each item as the shape:
+
+```javascript
+{
+  "start" : position,
+  "end"   : position,
+  "valid" : bool,
+  "message" : string,
+  "type"  : ("type"|"parser"|"env"|"warning"|"unkown")
+}
+```
+
+`start` and `end` are omitted if error has no location (e.g. wrong file format), otherwise the editor should probably hightlight / mark this range.
+`type` is an attempt to classify the error.
+`valid` is here mostly for informative purpose. It reflects whether Merlin was expecting such an error to be possible or not, and is useful for debugging purposes.
+`message` is the error description to be shown to the user.
+
 
 ```javascript
 ["project","get"]
@@ -360,6 +433,7 @@ It returns a `cursor state` object describind the state of the checked out buffe
 Switch to "default" buffer for "ml", "mli".
 It will be in the state you left it last time it was used, unless merlin decided to garbage collect because of memory pressure (any buffer left in background is either untouched or resetted because of collection).
 
+
 ```javascript
 ["checkout", "auto", string]
 ["checkout", "ml"  , string]
@@ -368,6 +442,7 @@ It will be in the state you left it last time it was used, unless merlin decided
 
 Checkout buffer at a given path, interpreting it as an ml, an mli, or infer that from path extension (defaulting to ml).
 File at path is not loaded, path is only used as a key to refer to the buffer and look for _.merlin_ files.
+
 
 ```javascript
 ["checkout", "dot_merlin", string list, "auto", string]
@@ -408,6 +483,7 @@ This is useful to prevent race conditions resulting from concurrent manipulation
 
 Returns a string describing merlin version.
 
+
 ```javascript
 ["boundary","next","at",position]
 ["boundary","prev","at",position]
@@ -433,11 +509,13 @@ Result is an arbitratry json object, targeted toward human readers.
 Dump content of environment.
 `"env"` is limited to local definition, `"full_env"` also includes `Pervasives` and default environment.
 
+
 ```javascript
 ["dump","sig"]
 ```
 
 Dump definitions in environment as an ML signature.
+
 
 ```javascript
 ["dump","tokens"]
@@ -446,6 +524,7 @@ Dump definitions in environment as an ML signature.
 ```
 
 Dump output of the lexer, state of the parser and possible recoveries.
+
 
 ```javascript
 ["dump","browse"]
@@ -457,6 +536,7 @@ Dump state of typechecker.
 `"input"` is the AST has seen by the typer.
 `"output"` is the annotated AST produced by the typer.
 `"browse"` is a json-based tree built out of the `"output"`.
+
 
 ```javascript
 ["dump","flags"]
